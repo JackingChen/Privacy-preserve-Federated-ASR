@@ -1,1 +1,7 @@
 saves/**
+centralized/saves/**
+centralized/dataset/**
+federated/dataset/**
+federated/save/**
+logs/**
+**/*.pyc
