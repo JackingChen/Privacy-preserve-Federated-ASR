@@ -260,11 +260,12 @@ class RecallLoss(nn.Module):
             return precision_ori_loss
         
 class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
-    def __init__(self, config, args):
+    def __init__(self, config, args, verbose=False):
         super().__init__(config, args)
 
         self.data2vec_audio = Data2VecAudioModel(config)
         self.dropout = nn.Dropout(config.final_dropout)
+        self.verbose=verbose
 
         if config.vocab_size is None:
             raise ValueError(
@@ -276,7 +277,8 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
 
         self.alpha=torch.tensor(args.LAMBDA)
         #self.lm_thres = torch.tensor(LM_THRES)
-        print("lambda = ", self.alpha)
+        if self.verbose:
+            print("lambda = ", self.alpha)
         #print("lm_thres = ", self.lm_thres)
         self.TOGGLE_RATIO=args.TOGGLE_RATIO
         self.GS_TAU=args.GS_TAU
@@ -302,14 +304,16 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         self.freeze_feature_encoder()
 
         if args.STAGE == 1:                                                  # freeze all, train AD classifier alone
-            print("Current stage: 1")
+            if self.verbose:
+                print("Current stage: 1")
             self.freeze_data2vec_audio()
             self.freeze_lm_head()
             #self.freeze_lm_fsm()
             self.freeze_arbitrator()
             self.freeze_criterion_similar()
         elif args.STAGE == 2:                                                # freeze all, train toggle network alone
-            print("Current stage: 2")
+            if self.verbose:
+                print("Current stage: 2")
             self.freeze_data2vec_audio()
             self.freeze_lm_head()
             self.freeze_dementia_head()
@@ -611,12 +615,12 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         )
 
 class Data2VecAudioForCTC_eval(Data2VecAudioPreTrainedModel):
-    def __init__(self, config, args):
+    def __init__(self, config, args, verbose=False):
         super().__init__(config, args)
 
         self.data2vec_audio = Data2VecAudioModel(config)
         self.dropout = nn.Dropout(config.final_dropout)
-
+        self.verbose=verbose
         if config.vocab_size is None:
             raise ValueError(
                 f"You are trying to instantiate {self.__class__} with a configuration that "
@@ -627,7 +631,8 @@ class Data2VecAudioForCTC_eval(Data2VecAudioPreTrainedModel):
 
         self.alpha=torch.tensor(args.LAMBDA)
         #self.lm_thres = torch.tensor(LM_THRES)
-        print("lambda = ", self.alpha)
+        if self.verbose:
+            print("lambda = ", self.alpha)
         #print("lm_thres = ", self.lm_thres)
         self.TOGGLE_RATIO=args.TOGGLE_RATIO
         self.GS_TAU=args.GS_TAU
@@ -652,15 +657,17 @@ class Data2VecAudioForCTC_eval(Data2VecAudioPreTrainedModel):
         # freeze feature_extractor    
         self.freeze_feature_encoder()
 
-        if args.STAGE == 1:                                                  # freeze all, train AD classifier alone
-            print("Current stage: 1")
+        if args.STAGE == 1:     
+            if self.verbose:                                             # freeze all, train AD classifier alone
+                print("Current stage: 1")
             self.freeze_data2vec_audio()
             self.freeze_lm_head()
             #self.freeze_lm_fsm()
             self.freeze_arbitrator()
             self.freeze_criterion_similar()
-        elif args.STAGE == 2:                                                # freeze all, train toggle network alone
-            print("Current stage: 2")
+        elif args.STAGE == 2:   
+            if self.verbose:                                             # freeze all, train toggle network alone
+                print("Current stage: 2")
             self.freeze_data2vec_audio()
             self.freeze_lm_head()
             self.freeze_dementia_head()

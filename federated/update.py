@@ -269,7 +269,8 @@ class LocalUpdate(object):
                         global_round, iter, batch_idx * len(images),
                         len(self.trainloader.dataset),
                         100. * batch_idx / len(self.trainloader), loss.item()))
-                self.logger.add_scalar('loss', loss.item())
+                if self.logger:
+                    self.logger.add_scalar('loss', loss.item())
                 batch_loss.append(loss.item())                                  # save loss for each step
             epoch_loss.append(sum(batch_loss)/len(batch_loss))                  # average losses to loss for this epoch
 
