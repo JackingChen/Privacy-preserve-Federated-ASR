@@ -11,10 +11,9 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.data2vec.modeling_data2vec_audio import Data2VecAudioFeatureProjection, Data2VecAudioPositionalConvLayer, Data2VecAudioEncoder, Data2VecAudioFeatureEncoder
 from torch import nn
 import math
-from transformers.pytorch_utils import torch_int_div
+# from transformers.pytorch_utils import torch_int_div
 from transformers import Data2VecAudioModel
 from transformers.modeling_outputs import CausalLMOutput
-from transformers import Trainer
 import json
 DATA2VEC_AUDIO_INPUTS_DOCSTRING = r"""
     Args:
@@ -46,13 +45,90 @@ DATA2VEC_AUDIO_INPUTS_DOCSTRING = r"""
         return_dict (`bool`, *optional*):
             Whether or not to return a [`~file_utils.ModelOutput`] instead of a plain tuple.
 """
-
 _PROCESSOR_FOR_DOC = "Wav2Vec2Processor"
 _CHECKPOINT_FOR_DOC = "facebook/data2vec-audio-base-960h"
 
 _CTC_EXPECTED_OUTPUT = "'MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL'"
 _CTC_EXPECTED_LOSS = 66.95
 _CONFIG_FOR_DOC = "Data2VecAudioConfig"
+
+
+def FSMatt_loss(lm_masks, dementia_masks):                       # calculate cos similarity for each sample avg over samples
+    loss = 0
+    for i in range(len(lm_masks)):                               # for each sample
+        lm_mask = lm_masks[i]
+        AD_mask = dementia_masks[i]
+
+        lm_mask_mean = torch.mean(lm_mask,dim=0)                 # average along t-axis
+        dementia_mask_mean = torch.mean(AD_mask,dim=0)           # average along t-axis
+
+        cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
+        s12 = cos(lm_mask_mean, dementia_mask_mean)              # cosine similarity
+        s21 = cos(dementia_mask_mean, lm_mask_mean)
+        row1 = torch.cat((torch.Tensor([0]).to(s12.device), torch.Tensor([s12]).to(s12.device)), 0)
+        row2 = torch.cat((torch.Tensor([s21]).to(s21.device), torch.Tensor([0]).to(s21.device)), 0)
+        row1 = torch.unsqueeze(row1, 0)
+        row2 = torch.unsqueeze(row2, 0)
+        S = torch.cat((row1, row2), 0)                           # [[0, s12], [s21, 0]]
+        loss += torch.norm(S, p='fro')                           # Frobenius norm
+
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+    # type: (Tensor, float, bool, float, int) -> Tensor
+    r"""
+    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
+    You can use this function to replace "F.gumbel_softmax".
+    
+    Args:
+      logits: `[..., num_features]` unnormalized log probabilities
+      tau: non-negative scalar temperature
+      hard: if ``True``, the returned samples will be discretized as one-hot vectors,
+            but will be differentiated as if it is the soft sample in autograd
+      dim (int): A dimension along which softmax will be computed. Default: -1.
+    Returns:
+      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
+      If ``hard=True``, the returned samples will be one-hot, otherwise they will
+      be probability distributions that sum to 1 across `dim`.
+    .. note::
+      This function is here for legacy reasons, may be removed from nn.Functional in the future.
+    .. note::
+      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
+      It achieves two things:
+      - makes the output value exactly one-hot
+      (since we add then subtract y_soft value)
+      - makes the gradient equal to y_soft gradient
+      (since we strip all other gradients)
+    Examples::
+        >>> logits = torch.randn(20, 32)
+        >>> # Sample soft categorical using reparametrization trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=False)
+        >>> # Sample hard categorical using "Straight-through" trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=True)
+    .. _Gumbel-Softmax distribution:
+        https://arxiv.org/abs/1611.00712
+        https://arxiv.org/abs/1611.01144
+    """
+    def _gen_gumbels():
+        gumbels = -torch.empty_like(logits).exponential_().log()
+        if torch.isnan(gumbels).sum() or torch.isinf(gumbels).sum():
+            # to avoid zero in exp output
+            gumbels = _gen_gumbels()
+        return gumbels
+
+    gumbels = _gen_gumbels()  # ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
+
+    if hard:
+        # Straight through.
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
+    else:
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
+
+
 @dataclass
 class DataCollatorCTCWithPadding:
     """
@@ -181,7 +257,8 @@ class Data2VecAudioPreTrainedModel(PreTrainedModel):
         def _conv_out_length(input_length, kernel_size, stride):
             # 1D convolutional layer output length formula taken
             # from https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
-            return torch_int_div(input_length - kernel_size, stride) + 1
+            # return torch_int_div(input_length - kernel_size, stride) + 1
+            return torch.div(input_length - kernel_size, stride) + 1
 
         for kernel_size, stride in zip(self.config.conv_kernel, self.config.conv_stride):
             input_lengths = _conv_out_length(input_lengths, kernel_size, stride)
@@ -345,59 +422,51 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         return CausalLMOutput(
             loss=final_loss, logits=logits, hidden_states=outputs.hidden_states, attentions=outputs.attentions
         )
+class RecallLoss(nn.Module):
+    """ An unofficial implementation of
+        <Recall Loss for Imbalanced Image Classification and Semantic Segmentation>
+        Created by: Zhang Shuai
+        Email: shuaizzz666@gmail.com
+        recall = TP / (TP + FN)
+    Args:
+        weight: An array of shape [C,]
+        predict: A float32 tensor of shape [N, C, *], for Semantic segmentation task is [N, C, H, W]
+        target: A int64 tensor of shape [N, *], for Semantic segmentation task is [N, H, W]
+    Return:
+        diceloss
+    """
+    def __init__(self, weight=None):
+        super(RecallLoss, self).__init__()
+        if weight is not None:
+            weight = torch.Tensor(weight)
+            self.weight = weight / torch.sum(weight) # Normalized weight
+        self.smooth = 1e-5
+
+    def forward(self, input, target):
+        input = input.to(torch.float)
+        target = target.to(torch.int64)
+
+        N, C = input.size()[:2]                                                         # [batch_size, 2]
+        logpt = F.log_softmax(input, dim=1)
+        pt = logpt.exp()                                                                # pred_prob: [batch_size, 2]
+        ## convert target (N, 1, *) into one hot vector (N, C, *)
+        target = target.view(N, 1, -1)                                                  # (N, 1, *)
+        last_size = target.size(-1)
+        target_onehot = torch.zeros((N, C, last_size)).type_as(pt)                      # (N, 1, *) ==> (N, C, *)
+        target_onehot.scatter_(1, target, 1)                                            # (N, C, *)
+
+        true_positive = torch.sum(pt.view(N, C, last_size) * target_onehot, dim=2)      # (N, C): true label的預測"機率"
+        total_target = torch.sum(target_onehot, dim=2)                                  # (N, C): true_prob
+        ## Recall = TP / (TP + FN)
+        # true_positive: true label的預測"機率"
+        recall = (true_positive + self.smooth) / (total_target + self.smooth)           # (N, C): true label的預測"機率", false label為1
+        # recall: true label的預測"機率", false label為1
+
+        if hasattr(self, 'weight'):
+            if self.weight.type() != input.type():
+                self.weight = self.weight.type_as(input)
+            recall = (torch.ones((N, C)).type_as(recall) - recall) * self.weight * C            # (N, C): 1 - recall
+        recall_loss = torch.mean(recall)  # mean越小越好，recall越小越好，1 - true label的預測"機率"越小越好 --> true label的預測"機率"越大越好
+        return recall_loss
 
 
-class DementiaGRLTrainer(Trainer):  
-    def __init__(self, model, args,log_file):
-        super().__init__(model, args)
-        self.log_file=log_file
-        self._my_private_variable = "initial_value"  
-    def compute_loss(self, model, inputs, return_outputs=False):
-            """
-            How the loss is computed by Trainer. By default, all models return the loss in the first element.
-            Subclass and override for custom behavior.
-            """
-            #dementia_labels = inputs.pop("dementia_labels") # pop 出來就會不見?
-            
-            if self.label_smoother is not None and "labels" in inputs:
-                labels = inputs.pop("labels")
-            else:
-                labels = None
-            
-            outputs = model(**inputs)
-            # Save past state if it exists
-            # TODO: this needs to be fixed and made cleaner later.
-            if self.args.past_index >= 0:
-                self._past = outputs[self.args.past_index]
-
-            if labels is not None:
-                loss = self.label_smoother(outputs, labels)
-            else:
-                # We don't use .loss here since the model may return tuples instead of ModelOutput.
-                loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-
-            return (loss, outputs) if return_outputs else loss
-    def log(self, logs: Dict[str, float]) -> None:
-        """
-        Log `logs` on the various objects watching training.
-        Subclass and override this method to inject custom behavior.
-        Args:
-            logs (`Dict[str, float]`):
-                The values to log.
-        """
-        if self.state.epoch is not None:
-            logs["epoch"] = round(self.state.epoch, 2)
-
-        output = {**logs, **{"step": self.state.global_step}}
-        self.state.log_history.append(output)
-        # 設定log file位置與名稱
-
-        LOG_DIR = './saves/log/'
-        # write to txt file
-        file_object = open(LOG_DIR + self.log_file, 'a')
-        # Append at the end of file
-        file_object.write(json.dumps(output) + '\n')
-        # Close the file
-        file_object.close()
-
-        self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)

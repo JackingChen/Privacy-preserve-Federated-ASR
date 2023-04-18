@@ -4,7 +4,6 @@ import numpy as np
 from transformers import Wav2Vec2Processor, Data2VecAudioModel
 from transformers.training_args import TrainingArguments
 from transformers.utils import logging
-from transformers.pytorch_utils import torch_int_div
 from transformers.models.data2vec.configuration_data2vec_audio import Data2VecAudioConfig
 
 from transformers import TrainingArguments
@@ -13,21 +12,63 @@ from datasets import load_metric
 import argparse
 from utils import csv2dataset
 from Models import (DataCollatorCTCWithPadding, 
-                    Data2VecAudioForCTC,
-                    DementiaGRLTrainer)
-logger = logging.get_logger(__name__)
-# import librosa
-# from datasets import load_from_disk
-# from jiwer import wer
-# import pandas as pd
-# from datasets import Dataset
-# from torch.utils.data import Dataset
-# import os
-# from torch import nn
-# import torch
-# import math
-# import torch
-# import torch.utils.checkpoint
+                    Data2VecAudioForCTC,)
+from transformers import Trainer
+import os, json
+class DementiaGRLTrainer(Trainer):  
+    def update_log_file(self, log_file=None):
+        self.log_file=log_file
+    def compute_loss(self, model, inputs, return_outputs=False):
+            """
+            How the loss is computed by Trainer. By default, all models return the loss in the first element.
+            Subclass and override for custom behavior.
+            """
+            #dementia_labels = inputs.pop("dementia_labels") # pop 出來就會不見?
+            
+            if self.label_smoother is not None and "labels" in inputs:
+                labels = inputs.pop("labels")
+            else:
+                labels = None
+            
+            outputs = model(**inputs)
+            # Save past state if it exists
+            # TODO: this needs to be fixed and made cleaner later.
+            if self.args.past_index >= 0:
+                self._past = outputs[self.args.past_index]
+
+            if labels is not None:
+                loss = self.label_smoother(outputs, labels)
+            else:
+                # We don't use .loss here since the model may return tuples instead of ModelOutput.
+                loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+            return (loss, outputs) if return_outputs else loss
+    def log(self, logs: Dict[str, float]) -> None:
+        """
+        Log `logs` on the various objects watching training.
+        Subclass and override this method to inject custom behavior.
+        Args:
+            logs (`Dict[str, float]`):
+                The values to log.
+        """
+        if self.state.epoch is not None:
+            logs["epoch"] = round(self.state.epoch, 2)
+
+        output = {**logs, **{"step": self.state.global_step}}
+        self.state.log_history.append(output)
+        # 設定log file位置與名稱
+
+        LOG_DIR = './saves/log/'
+        if not os.path.exists(LOG_DIR):
+            os.makedirs(LOG_DIR)
+        # write to txt file
+        file_object = open(LOG_DIR + self.log_file, 'a')
+        # Append at the end of file
+        file_object.write(json.dumps(output) + '\n')
+        # Close the file
+        file_object.close()
+
+        self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)
 def prepare_dataset(batch):
     audio = batch["array"]
 
@@ -40,21 +81,24 @@ def prepare_dataset(batch):
     return batch
 
 
-
 wer_metric = load_metric("wer")
 def compute_metrics(pred):
     pred_logits = pred.predictions
     pred_ids = np.argmax(pred_logits, axis=-1)
 
-    pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
+    # GRL之後input 就會多丟一項dementia label所以要特別處裡
+    label_ids_asr , label_ids_AD=pred.label_ids
+
+    label_ids_asr[label_ids_asr == -100] = processor.tokenizer.pad_token_id
 
     pred_str = processor.batch_decode(pred_ids)
     # we do not want to group tokens when computing the metrics
-    label_str = processor.batch_decode(pred.label_ids, group_tokens=False)
+    label_str = processor.batch_decode(label_ids_asr, group_tokens=False)
 
     wer = wer_metric.compute(predictions=pred_str, references=label_str)
 
     return {"wer": wer}
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
@@ -63,7 +107,7 @@ parser.add_argument('-GRL', '--GRL', action='store_true', default=False, help="T
 parser.add_argument('-model_in', '--model_in_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h/final/", help="Where the model is saved")
 parser.add_argument('-model_out', '--model_out_path', type=str, default="./saves/data2vec2-base-960h_linear_GRL", help="Where to save the model")
 parser.add_argument('-log', '--log_path', type=str, default="data2vec2-base-960h_linear_GRL.txt", help="name for the txt file")
-args = parser.parse_args()
+args = parser.parse_args(args=[])
 LAMBDA = args.LAMBDA                    # lambda for GRL
 REVERSE = args.GRL                      # not used in this version
 STAGE = args.STAGE                      # stage 1: train AD classifier; stage 2: train toggling network
@@ -88,9 +132,9 @@ processor = Wav2Vec2Processor.from_pretrained(name)
 data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
 
 # load train / test data
-train_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/train.csv")
+train_data = csv2dataset(csv_path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/train.csv")
 #dev_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/dev.csv")
-test_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv")
+test_data = csv2dataset(csv_path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv")
 
 # map to desired form
 train_data = train_data.map(prepare_dataset, num_proc=10)
@@ -101,7 +145,7 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 training_args = TrainingArguments(
     output_dir=model_out_dir,
     group_by_length=True,
-    per_device_train_batch_size=1,
+    per_device_train_batch_size=10,
     per_device_eval_batch_size=1,
     evaluation_strategy="steps",
     num_train_epochs=30,                 # finetune & GRL
@@ -130,11 +174,12 @@ trainer = DementiaGRLTrainer(
     train_dataset=train_data,
     eval_dataset=test_data,
     tokenizer=processor.feature_extractor,
-    log_file=log_file
 )
-
+trainer.update_log_file(log_file=log_file)
 trainer.train() #"./saves/data2vec-audio-large-960h_GRL/checkpoint-56000/"
 trainer.save_model(model_out_dir + "/final")
+
+
 
 
 

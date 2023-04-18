@@ -1,3 +1,11 @@
+# =============================================================
+# 更新2023/04/10
+# 1. csv2dataset函數裡面使用csv_path和root_path
+# 2. 在讀音檔的時候增加一個選項：scipy.io，讀起來會快很多但是不知道會不會影響到原來的效果
+
+# 大約10138MiB
+# =============================================================
+
 import torch
 import numpy as np
 from dataclasses import dataclass, field
@@ -11,6 +19,8 @@ from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor, Trainer, TrainingArg
 from transformers import Data2VecAudioConfig, HubertConfig, SEWDConfig, UniSpeechSatConfig
 from transformers import Data2VecAudioForCTC, HubertForCTC, SEWDForCTC, UniSpeechSatForCTC
 from jiwer import wer
+import scipy.io
+from utils import csv2dataset, WriteResult
 
 # set up trainer
 @dataclass
@@ -74,37 +84,6 @@ class DataCollatorCTCWithPadding:
         batch["labels"] = labels
 
         return batch
-    
-def csv2dataset(PATH = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/clips/',
-                path = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv'):
-    stored = "./dataset/" + path.split("/")[-1].split(".")[0]
-    if (os.path.exists(stored)):
-        #print("loaded")
-        return load_from_disk(stored)
-        
-    data = pd.read_csv(path)                                                # read desired csv
-    dataset = Dataset.from_pandas(data)                                     # turn into class dataset
-    
-    # initialize a dictionary
-    my_dict = {}
-    my_dict["path"] = []                                                   # path to audio
-    my_dict["array"] = []                                                  # waveform in array
-    my_dict["text"] = []                                                   # ground truth transcript
-
-    i = 1
-    for path in dataset['path']:                                           # for all files
-        if dataset['sentence'][i-1] != None:                               # only the non-empty transcript
-            sig, s = librosa.load(PATH + path, sr=16000, dtype='float32')  # read audio w/ 16k sr
-            my_dict["path"].append(path)                                   # add path
-            my_dict["array"].append(sig)                                   # add audio wave
-            my_dict["text"].append(dataset['sentence'][i-1].upper())       # transcript to uppercase
-        print(i, end="\r")                                                 # print progress
-        i += 1
-    print("There're ", len(my_dict["path"]), " non-empty files.")
-
-    result_dataset = Dataset.from_dict(my_dict)
-
-    return result_dataset
 
 def prepare_dataset(batch):
     audio = batch["array"]
@@ -142,26 +121,35 @@ def map_to_result(batch):
   
     return batch
 
-# load in train-dev-test
-train_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/train.csv")
-dev_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/dev.csv")
-test_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv")
-
 import argparse
 
 parser = argparse.ArgumentParser()
 #parser.add_argument('-model', '--model_path', type=str, default="./saves/wav2vec2-base-960h_GRL_0.5", help="Where the model is saved")
 parser.add_argument('-opt', '--optimizer', type=str, default="adamw_hf", help="The optimizer to use: adamw_hf, adamw_torch, adamw_apex_fused, or adafactor")
 parser.add_argument('-MGN', '--max_grad_norm', type=float, default=1.0, help="Maximum gradient norm (for gradient clipping)")
-parser.add_argument('-model_type', '--model_type', type=str, default="wav2vec2", help="Type of the model")
-parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4, help="Learning rate")
-
+parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
+parser.add_argument('-sr', '--sampl_rate', type=float, default=16000, help="librosa read smping rate")
+parser.add_argument('-lr', '--learning_rate', type=float, default=1e-5, help="Learning rate")
+parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
+parser.add_argument('--AudioLoadFunc', default='librosa', help="用scipy function好像可以比較快")
 args = parser.parse_args()
+
+
+
 #model_out_dir = args.model_path # where to save model
 model_type = args.model_type                # what type of the model
 lr = args.learning_rate                     # learning rate
 optim = args.optimizer                      # opt
 max_grad_norm = args.max_grad_norm          # max_grad_norm
+
+
+# load in train-dev-test
+train_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
+                         csv_path = "{}/mid_csv/train.csv".format(args.root_dir)) #!!! librosa在load的時候非常慢，大約7分47秒讀完1869個file
+dev_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
+                       csv_path = "{}/mid_csv/dev.csv".format(args.root_dir))
+test_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
+                        csv_path = "{}/mid_csv/test.csv".format(args.root_dir))
 
 if model_type == "wav2vec":
     name = "facebook/wav2vec2-base-960h" # + model_dir.split("/")[-3]
@@ -201,8 +189,8 @@ else:
 
 
 # use processor to get labels
-# 這邊map函數用的num_proc是為了把算出來的feature存到cache上面，4代表把data切成4個分片，這步看起來只能用在prepare dataset上
-# /home/FedASR/dacs/centralized/dataset/train/cache-1f470397349aa062_*_of_00004.arrow" 
+# 在這段程式碼中，map() 是一個運用在 test_data 上的函式，它的目的是將 test_data 中的每個元素都應用到 map_to_result 函式上，並生成一個新的結果序列。
+# datasets object 通常使用.map()函數更改裡面預設的變數
 train_data = train_data.map(prepare_dataset, num_proc=4)
 dev_data = dev_data.map(prepare_dataset, num_proc=4)
 test_data = test_data.map(prepare_dataset, num_proc=4)
@@ -214,7 +202,7 @@ model.freeze_feature_encoder()
 training_args = TrainingArguments(
     output_dir="./saves/" + name.split("/")[-1] + "_finetuned",
     group_by_length=True,
-    per_device_train_batch_size=3,
+    per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     evaluation_strategy="steps",
     num_train_epochs=30,
@@ -241,27 +229,29 @@ trainer = Trainer(
     tokenizer=processor.feature_extractor,
 )
 trainer.train()
-trainer.save_model("./saves/" + name.split("/")[-1] + "_finetuned/final")
+Save_path="./saves/" + name.split("/")[-1] + "_finetuned/final"
+trainer.save_model(Save_path)
 
 # load in trained model
 if model_type == "wav2vec":
-    new_model = Wav2Vec2ForCTC.from_pretrained("./saves/" + name.split("/")[-1] + "_finetuned/final")
+    new_model = Wav2Vec2ForCTC.from_pretrained(Save_path)
     new_processor = Wav2Vec2Processor.from_pretrained(name)
 elif model_type == "data2vec":
-    new_model = Data2VecAudioForCTC.from_pretrained("./saves/" + name.split("/")[-1] + "_finetuned/final")
+    new_model = Data2VecAudioForCTC.from_pretrained(Save_path)
     new_processor = Wav2Vec2Processor.from_pretrained(name)
 elif model_type == "hubert":
-    new_model = HubertForCTC.from_pretrained("./saves/" + name.split("/")[-1] + "_finetuned/final")
+    new_model = HubertForCTC.from_pretrained(Save_path)
     new_processor = Wav2Vec2Processor.from_pretrained(name)
 elif model_type == "sewd":
-    new_model = SEWDForCTC.from_pretrained("./saves/" + name.split("/")[-1] + "_finetuned/final")
+    new_model = SEWDForCTC.from_pretrained(Save_path)
     new_processor = Wav2Vec2Processor.from_pretrained(name)
 elif model_type == "unispeech":
-    new_model = UniSpeechSatForCTC.from_pretrained("./saves/" + name.split("/")[-1] + "_finetuned/final")
+    new_model = UniSpeechSatForCTC.from_pretrained(Save_path)
     new_processor = Wav2Vec2Processor.from_pretrained(name)
 else:
     print("WRONG TYPE!!!!!!!!!!!!!!!!")
 
 result = test_data.map(map_to_result)
 print("WER of ", name, " : ", wer(result["text"], result["pred_str"]))
+WriteResult(result,Save_path)
 print("DONE!")

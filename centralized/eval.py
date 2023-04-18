@@ -27,11 +27,8 @@ from transformers.file_utils import (
     WEIGHTS_NAME,
     ModelOutput,
     PushToHubMixin,
-    cached_path,
     copy_func,
-    hf_bucket_url,
     is_offline_mode,
-    is_remote_url,
     replace_return_docstrings,
     is_datasets_available,
     add_code_sample_docstrings,
@@ -450,10 +447,10 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current stage")
-parser.add_argument('-model', '--model_path', type=str, default="./saves/wav2vec2-base-960h_GRL_0.5/checkpoint-14010/", help="Where the model is saved")
-parser.add_argument('-csv', '--csv_path', type=str, default="wav2vec2-base-960h_GRL_0.5", help="name for the csv file")
+parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_GRL/final/", help="Where the model is saved")
+parser.add_argument('-csv', '--csv_path', type=str, default="data2vec-audio-large-960h_GRL_0.5", help="name for the csv file")
 parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Threshold for AD & ASR")
-parser.add_argument('-model_type', '--model_type', type=str, default="wav2vec2", help="Type of the model")
+parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
 
 args = parser.parse_args()
 LAMBDA = args.LAMBDA                    # lambda for GRL
@@ -1472,6 +1469,7 @@ data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
 test_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv")
 test_data = test_data.map(prepare_dataset, num_proc=10)
 
+
 # get emb.s, masks... 1 sample by 1 sample
 df = map_to_result(test_data[0], 0)
 for i in range(len(test_data) - 1):
@@ -1482,7 +1480,7 @@ for i in range(len(test_data) - 1):
 csv_path = "./saves/results/" + csv_name + ".csv"
 df.to_csv(csv_path)
 print("Testing data Done")
-
+aaa=ccc
 
 # store result of train data
 train_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/train.csv")

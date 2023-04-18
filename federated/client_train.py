@@ -20,6 +20,7 @@ import argparse
 
 def client_train(args, train_dataset, logger,
                  test_dataset, idx, epoch, global_weights=None):
+    logger = SummaryWriter('../logs_PID{}'.format(os.getpid()))
     if args.model == 'data2vec':
         mask_time_prob = 0                                                          # change config to avoid training stopping
         config = Data2VecAudioConfig.from_pretrained(args.pretrain_name, mask_time_prob=mask_time_prob)

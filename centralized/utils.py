@@ -17,7 +17,7 @@ parser.add_argument('-sr', '--sampl_rate', type=float, default=16000, help="libr
 parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4, help="Learning rate")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--AudioLoadFunc', default='librosa', help="用scipy function好像可以比較快")
-args = parser.parse_args()
+args = parser.parse_args(args=[])
 
 
 # def csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
@@ -109,3 +109,5 @@ def WriteResult(result,Save_path):
     df_results=pd.DataFrame([result['text'],result['pred_str']], index=['GroundTruth','PredStr']).T
     df_results.to_csv('{}/Result.csv'.format(Save_path))
     print("Writing results to {}".format(Save_path))
+
+
