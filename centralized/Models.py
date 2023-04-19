@@ -71,6 +71,7 @@ def FSMatt_loss(lm_masks, dementia_masks):                       # calculate cos
         row2 = torch.unsqueeze(row2, 0)
         S = torch.cat((row1, row2), 0)                           # [[0, s12], [s21, 0]]
         loss += torch.norm(S, p='fro')                           # Frobenius norm
+    return loss / (i+1)
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor

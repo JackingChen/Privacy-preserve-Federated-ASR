@@ -414,7 +414,7 @@ parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda fo
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current training stage")
 parser.add_argument('-GRL', '--GRL', action='store_true', default=False, help="True: GRL")
 parser.add_argument('-model_in', '--model_in_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_finetuned/final/", help="Where the model is saved")
-parser.add_argument('-model_out', '--model_out_path', type=str, default="./saves/data2vec-audio-large-960h_linear_SingleToggle", help="Where to save the model")
+parser.add_argument('-model_out', '--model_out_path', type=str, default="./saves/data2vec-audio-large-960h_linear_SingleToggle_stage1", help="Where to save the model")
 parser.add_argument('-log', '--log_path', type=str, default="data2vec-audio-large-960h_linear_SingleToggle.txt", help="name for the txt file")
 # 2023/01/08: loss type
 parser.add_argument('-ad_loss', '--AD_loss', type=str, default="cel", help="loss to use for AD classifier")

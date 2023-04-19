@@ -5,6 +5,11 @@ from datasets import Dataset, load_from_disk
 import librosa
 import scipy.io.wavfile
 import numpy as np
+from datasets import (
+    Dataset,
+    load_from_disk,
+    load_metric,
+)
 # =======================================
 # 有一些common的function丟到這邊
 # =======================================
@@ -111,3 +116,4 @@ def WriteResult(result,Save_path):
     print("Writing results to {}".format(Save_path))
 
 
+  
