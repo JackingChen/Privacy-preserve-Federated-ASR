@@ -470,4 +470,3 @@ class RecallLoss(nn.Module):
         recall_loss = torch.mean(recall)  # mean越小越好，recall越小越好，1 - true label的預測"機率"越小越好 --> true label的預測"機率"越大越好
         return recall_loss
 
-
