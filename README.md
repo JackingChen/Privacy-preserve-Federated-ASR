@@ -4,6 +4,7 @@
     - transformers==4.17.0
     - datasets
     - jiwer
+    - Levenshtein==0.21.0
 
 # Training
 1. Baselines
