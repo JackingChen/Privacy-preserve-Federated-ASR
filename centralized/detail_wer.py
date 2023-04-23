@@ -1,8 +1,12 @@
 import pandas as pd
-from jiwer.transformations import wer_default, wer_standardize, cer_default_transform
+# from jiwer.transformations import wer_default, wer_standardize, cer_default_transform
+from jiwer.transformations import wer_default, wer_standardize
 from jiwer import transforms as tr
 from itertools import chain
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+import Levenshtein
+import numpy as np
+import os
 
 def _preprocess(
     truth: List[str],
@@ -210,7 +214,7 @@ def compute_measures(
         "deletions": D,
         "insertions": I,
     }
-import Levenshtein
+
 def _get_operation_counts(
     save_path,
     source_string: str, destination_string: str
@@ -236,7 +240,7 @@ def _get_operation_counts(
     
     return hits, substitutions, deletions, insertions
 
-import numpy as np
+
 def ID2MMSE(ID,
             id2mmse = np.load("/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/dataset/ID2MMSE_train.npy", allow_pickle=True).tolist()):
 
@@ -247,7 +251,7 @@ def ID2MMSE(ID,
         MMSE = id2mmse[name[0]]                           # label according to look-up table
     return MMSE                                           # return MMSE for this file
 
-import os
+
 def detail_wer(csv_path, detail_path, level, TEST):
     df = pd.read_csv(csv_path)                      # all data
     true_trans_lst = df.text.values.tolist()        # true trans
@@ -255,6 +259,9 @@ def detail_wer(csv_path, detail_path, level, TEST):
     pred_trans_lst = df.pred_str.values.tolist()    # pred trans
     utt_lst = df.path.values.tolist()               # file names
     AD_lst = df.dementia_labels.values.tolist()     # dementia labels
+
+    if not os.path.exists(detail_path):
+        os.makedirs(detail_path)
     
     if level >= 1:                                      # output overall detail
         if (os.path.exists(detail_path + "/overall.txt")):
@@ -337,8 +344,8 @@ import argparse
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', type=int, default=1, help="1: all, 2: HC & AD, 3: HC & 4 levels of AD")
-    parser.add_argument('-csv', '--csv_path', type=str, default="./saves/results/wav2vec2-base-960h_GRL_0.3_dev.csv", help="path of stored data, ex: ./saves/results/wav2vec2-base-960h_GRL_0.3_dev.csv")
-    parser.add_argument('-save', '--save_dir', type=str, default="./saves/results/detail_wer/wav2vec2-base-960h_GRL_0.3/", help="dir to store detail wer, ex: ./saves/results/detail_wer/wav2vec2-base-960h_GRL_0.3/")
+    parser.add_argument('-csv', '--csv_path', type=str, default="./EmbFeats/data2vec-audio-large-960h.csv", help="path of stored data, ex: ./saves/results/wav2vec2-base-960h_GRL_0.3_dev.csv")
+    parser.add_argument('-save', '--save_dir', type=str, default="./EmbFeats/detail_wer/wav2vec2-base-960h_GRL_0.3/", help="dir to store detail wer, ex: ./saves/results/detail_wer/wav2vec2-base-960h_GRL_0.3/")
     parser.add_argument('-T', '--TEST', action='store_true', default=False, help="flag for testing data")
     args = parser.parse_args()
     

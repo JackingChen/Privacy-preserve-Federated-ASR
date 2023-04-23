@@ -6,9 +6,10 @@ import argparse
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.metrics import balanced_accuracy_score, accuracy_score, f1_score, recall_score, precision_score, confusion_matrix
-from functions.Functions import ID2Label
+from utils import ID2Label
+import os
 
-def trainSVM(x_train, y_train, x_test, y_test, df_test, title):
+def trainSVM(x_train, y_train, x_test, y_test, df_test, title, outdir="./saves/results/SVM"):
     sc = StandardScaler()
     sc.fit(x_train)
     x_train_std = sc.transform(x_train)
@@ -57,27 +58,31 @@ def trainSVM(x_train, y_train, x_test, y_test, df_test, title):
     cm = confusion_matrix(true, pred)
     
     # save results
-    df = pd.read_csv("./saves/results/SVM/results.csv")                           # read in previous results
+    df = pd.read_csv(f"{outdir}/results.csv")                           # read in previous results
     new_row = {'model': title + " spkid-wise",
                'ACC':accuracy_score(true, pred), 'BACC':balanced_accuracy_score(true, pred), 'F1':f1_score(true, pred),
                'Sens':recall_score(true, pred), 'Spec':cm[0,0]/(cm[0,0]+cm[0,1]), 'UAR': recall_score(true, pred, average='macro')}
                                                                                   # result to save
     df2 = pd.DataFrame([new_row])
     df3 = pd.concat((df, df2), axis = 0)                                          # append row
-    df3.to_csv("./saves/results/SVM/results.csv", index=False)
+    df3.to_csv(f"{outdir}/results.csv", index=False)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('-model', '--model_name', type=str, default="FSM_indiv_AMLoss_5_lmFSM", help="name of the desired model, ex: FSM_indiv_AMLoss_5_lmFSM")
+    parser.add_argument('-model', '--model_name', type=str, default="data2vec-audio-large-960h", help="name of the desired model, ex: FSM_indiv_AMLoss_5_lmFSM")
     parser.add_argument('-INV', '--INV', action='store_true', default=False, help="True: train w/ INV")
     parser.add_argument('-sq', '--squeeze', type=str, default="mean", help="way to squeeze hidden_states, 'mean', 'min', and 'max'")
+    parser.add_argument('-dataIn', '--dataIn_dir', type=str, default="./EmbFeats/", help="")
+    parser.add_argument('-rsltOut', '--rsltOut_dir', type=str, default="./saves/results/SVM", help="")
     args = parser.parse_args()
     sqz = args.squeeze
 
+    if not os.path.exists(args.rsltOut_dir):
+        os.makedirs(args.rsltOut_dir)
     # load in train / test data for certain model
-    df_train = pd.read_csv("./saves/results/" + args.model_name + "_train.csv")
-    df_test = pd.read_csv("./saves/results/" + args.model_name + ".csv")
+    df_train = pd.read_csv(f"{args.dataIn_dir}" + args.model_name + "_train.csv")
+    df_test = pd.read_csv(f"{args.dataIn_dir}" + args.model_name + ".csv")
     
     if not args.INV:
         print("Train w/ PAR only...")
@@ -138,7 +143,7 @@ def main() -> None:
         x_test = pd.DataFrame(re, columns=["masked_hidden_states"]).masked_hidden_states.tolist() # masked_hidden_states to list
         y_test = pd.DataFrame(df_test["dementia_labels"])
 
-        trainSVM(x_train, y_train, x_test, y_test, df_test, args.model_name + "_masked_INV_" + str(args.INV) + "_" + sqz)
+        trainSVM(x_train, y_train, x_test, y_test, df_test, args.model_name + "_masked_INV_" + str(args.INV) + "_" + sqz, outdir=args.rsltOut_dir)
     else:                                                                         # train w/ un-masked emb.
         # hidden_states to list
         for idx, i in enumerate(df_train.index.tolist()):                         # for training data
@@ -195,7 +200,7 @@ def main() -> None:
         x_test = pd.DataFrame(re, columns=["hidden_states"]).hidden_states.tolist()   # hidden_states to list
         y_test = pd.DataFrame(df_test["dementia_labels"])
         
-        trainSVM(x_train, y_train, x_test, y_test, df_test, args.model_name + "_ori_INV_" + str(args.INV) + "_" + sqz)
+        trainSVM(x_train, y_train, x_test, y_test, df_test, args.model_name + "_ori_INV_" + str(args.INV) + "_" + sqz, outdir=args.rsltOut_dir)
 
 
 if __name__ == "__main__":

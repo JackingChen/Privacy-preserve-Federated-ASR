@@ -33,6 +33,12 @@ import argparse
 import os
 from tqdm import tqdm
 
+from torch.nn.parallel import DataParallel
+#2023/04/23 For using GPU
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Subset
+from tqdm import tqdm
+
 def prepare_dataset(batch):
     audio = batch["array"]
 
@@ -59,11 +65,60 @@ def compute_metrics(pred):
 
     return {"wer": wer}
 
-def Extract_Emb(dataset):
-    # get emb.s, masks... 1 sample by 1 sample
-    df = map_to_result(dataset[0], 0)
-    for i in tqdm(range(len(dataset) - 1)):
-        df2 = map_to_result(dataset[i+1], i+1)
+def Extract_Emb(dataset, GPU_batchsize=16):
+    if GPU_batchsize!=None:
+        df=pd.DataFrame()
+        for i in tqdm(range(0,len(dataset),args.GPU_batchsize)):
+            idxs=list(range(i,min(i+args.GPU_batchsize,len(dataset))))
+            subset_dataset = Subset(dataset, idxs)
+            df_data=get_Embs(subset_dataset)
+            df = pd.concat([df, df_data], ignore_index=True)
+    else:
+        # get emb.s, masks... 1 sample by 1 sample
+        df = map_to_result(dataset[0], 0)
+        for i in tqdm(range(len(dataset) - 1)):
+            df2 = map_to_result(dataset[i+1], i+1)
+            df = pd.concat([df, df2], ignore_index=True)
+    return df
+
+def get_Embs(subset_dataset):
+    with torch.no_grad():
+        # 將每個元素的 "input_values" 提取出來並組成一個列表
+        input_sequences = [torch.tensor(sample['input_values']) for sample in subset_dataset]
+        lengths = [len(sample['input_values']) for sample in subset_dataset]
+        # 將列表中的序列進行填充
+        padded_input_sequences = pad_sequence(input_sequences, batch_first=True)
+        # # 打印填充後的序列張量的形狀
+        # print(padded_input_sequences.shape)
+        # input_values=padded_input_sequences.cuda()
+        input_values=padded_input_sequences.to(device)
+        logits=model(input_values).logits  
+        asr_lg = logits['ASR logits']
+        # 轉換length的度量從sample到output的timestep
+        ratio=max(lengths)/asr_lg.shape[1]  # (batchsize, seqlength, logitsize)
+        oupLens=[int(l/ratio) for l in lengths]
+        # for l in lengths:
+        #     oupLens.append(int(l/ratio))
+        pred_ids = torch.argmax(asr_lg, dim=-1)
+        # batch["pred_str"] = processor.batch_decode(pred_ids)[0]
+        pred_str=processor.batch_decode(pred_ids)
+        # batch["text"] = processor.decode(batch["labels"], group_tokens=False)
+        # texts=[processor.decode(batch["labels"], group_tokens=False) for batch in subset_dataset]
+        # text=processor.decode(batch["labels"], group_tokens=False)
+
+    df = pd.DataFrame()
+    for i in range(len(subset_dataset)):
+        RealLength=oupLens[i]  #只要有從logits取出來的都要還原
+        df2 = pd.DataFrame({'path': subset_dataset[i]["path"],                                    # to know which sample
+                # 'array': str(subset_dataset[i]["array"]),
+                'text': subset_dataset[i]["text"],
+                'dementia_labels': subset_dataset[i]["dementia_labels"],
+                # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
+                # 'labels': str(subset_dataset[i]["labels"]),
+                # 'ASR logits': str(logits["ASR logits"][i].tolist()),
+                'hidden_states': str(logits["hidden_states"][i][:RealLength,:].tolist()),
+                'pred_str': pred_str[i]},
+                index=[i])
         df = pd.concat([df, df2], ignore_index=True)
     return df
 
@@ -589,7 +644,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current stage")
 parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_FSM_new2/final/", help="Where the model is saved")
-parser.add_argument('-csv', '--csv_path', type=str, default="wav2vec2-base-960h_GRL_0.5", help="name for the csv file")
+parser.add_argument('-csv', '--csv_path', type=str, default="data2vec-audio-large-960h_new1_recall_82", help="name for the csv file")
 parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Threshold for AD & ASR")
 parser.add_argument('-model_type', '--model_type', type=str, default="wav2vec2", help="Type of the model")
 # 2023/01/08: loss type
@@ -606,6 +661,8 @@ parser.add_argument('-num_off', '--NUM_OFF', type=int, default=None, help="num o
 parser.add_argument('-ap_rt', '--AP_RATIO', type=float, default=0, help="To toggle more or less for aggressive & passive masking")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
+parser.add_argument('--GPU_batchsize', default=64, help="如果cpu滿了就用GPU")
+
 
 args = parser.parse_args()
 LAMBDA = args.LAMBDA                    # lambda for GRL
@@ -670,7 +727,18 @@ elif model_type == "unispeech":
 
 
 data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
+if args.GPU_batchsize != None:
+    # ======================
+    # model = model.cuda()
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+    if torch.cuda.device_count() > 1:
+        model = DataParallel(model)
 
+    # 將模型移動到GPU上
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    # ======================
 # store result of test data
 test_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
                         csv_path = "{}/mid_csv/test.csv".format(args.root_dir))
@@ -684,7 +752,7 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 #     print("\r"+ str(i), end="")
 
 # csv_path = "./saves/results/" + csv_name + ".csv"
-df_test=Extract_Emb(test_data)
+df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
 df_test.to_csv(f"{savePath}/{csv_name}_train.csv")
 print("Testing data Done")
 
@@ -702,9 +770,9 @@ train_data = train_data.map(prepare_dataset, num_proc=10)
 #     print("\r"+ str(i), end="")
 
 # csv_path = "./saves/results/" + csv_name + "_train.csv"
-df_train=Extract_Emb(train_data)
+df_train=Extract_Emb(train_data,GPU_batchsize=args.GPU_batchsize)
 df_train.to_csv(f"{savePath}/{csv_name}_train.csv")
-print("Testing data Done")
+print("Training data Done")
 
 # store result of dev data
 """
