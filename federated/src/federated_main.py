@@ -2,27 +2,20 @@
 # -*- coding: utf-8 -*-
 # Python version: 3.6
 
-
 import os
 import copy
 import time
-import pickle
 import numpy as np
 from tqdm import tqdm
 
-import torch
-from tensorboardX import SummaryWriter
-
 from options import args_parser
-from update import LocalUpdate, test_inference, ASRLocalUpdate
-from models import MLP, CNNMnist, CNNFashion_Mnist, CNNCifar, Data2VecAudioForCTC, DataCollatorCTCWithPadding
 from utils import get_dataset, average_weights, exp_details
 
-from transformers import Data2VecAudioConfig, Wav2Vec2Processor
 import multiprocessing
-from update import update_network, update_network_weight, get_model_weight
+from update import update_network_weight, get_model_weight
 
 from training import client_train, centralized_training
+from update import ASRLocalUpdate
 
 def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset, test_dataset):
     train_loss = []                                                                 # list for training loss
@@ -83,9 +76,12 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset, 
 
 # FL stage 1: ASR & AD Classifier
 def stage1_training(args, train_dataset, test_dataset):
+    local_epoch = args.local_ep                                                     # save given number of local epoch
     ##########################################################
     # Centralized Training: train global ASR & AD Classifier #
     ##########################################################
+    """
+    args.local_ep = args.global_ep                                                  # use number of global epoch for global model
     args.STAGE = 0                                                                  # train ASR first
     centralized_training(args=args, model_in_path=args.pretrain_name, model_out_path=args.model_out_path+"_finetune", 
                          train_dataset=train_dataset, test_dataset=test_dataset, epoch=0)
@@ -94,9 +90,11 @@ def stage1_training(args, train_dataset, test_dataset):
     centralized_training(args=args, model_in_path=args.model_out_path+"_finetune_global/final/", 
                          model_out_path=args.model_out_path, train_dataset=train_dataset, test_dataset=test_dataset, epoch=0)
                                                                                     # train from final result from last line, final result in args.model_out_path + "_global/final"
+    """
     ##########################################################
     # FL: train local ASR & AD Classifier federally          #
     ##########################################################
+    args.local_ep = local_epoch                                                     # use the given number of local epoch
     args.STAGE = 0                                                                  # train ASR first
     global_weights = FL_training_rounds(args=args, model_in_path_root=args.model_out_path, model_out_path=args.model_out_path+"_finetune",
                                         train_dataset=train_dataset, test_dataset=test_dataset)
@@ -114,20 +112,25 @@ def stage1_training(args, train_dataset, test_dataset):
     model = update_network_weight(args=args, source_path=args.model_out_path+"_FLASR_global/final", target_weight=global_weights, network="AD")
                                                                                     # update AD classifier in source_path with given weights
     model.save_pretrained(args.model_out_path+"_FLAD_global/final")
-
+    
     
 # FL stage 2: Toggling Network
 def stage2_training(args, train_dataset, test_dataset):
+    local_epoch = args.local_ep                                                     # save given number of local epoch
     ##########################################################
     # Centralized Training: train global Toggling Network    #
     ##########################################################
+    """
+    args.local_ep = args.global_ep                                                  # use number of global epoch for global model
     centralized_training(args=args, model_in_path=args.model_in_path + "_FLAD_global/final/", model_out_path=args.model_out_path, 
                          train_dataset=train_dataset, test_dataset=test_dataset, epoch=0)
                                                                                     # train from model_in_path + "_FLAD_global/final/" (aggregated ASR & AD)
                                                                                     # final result in args.model_out_path + "_global/final"
+    """
     ##########################################################
     # FL: train local Toggling Network federally             #
     ##########################################################
+    args.local_ep = local_epoch                                                     # use the given number of local epoch
     global_weights = FL_training_rounds(args=args, model_in_path_root=args.model_in_path, model_out_path=args.model_out_path,
                                         train_dataset=train_dataset, test_dataset=test_dataset)
     # update global model
@@ -135,8 +138,18 @@ def stage2_training(args, train_dataset, test_dataset):
                                                                                     # update toggling_network in source_path with given weights
     model.save_pretrained(args.model_out_path+"_final_global/final")
 
-
+def extract_emb(args, train_dataset, test_dataset):
+    if args.client_id == "public":
+        idx = "public"
+    else:
+        idx = int(args.client_id)
+    local_model = ASRLocalUpdate(args=args, dataset=train_dataset, global_test_dataset=test_dataset, 
+                                 client_id=idx, model_in_path=args.model_in_path, model_out_path=None)
+                                                                                      # initial dataset of current client
+    local_model.extract_embs()
+                                                                                      # from model_in_path model, update certain part using given weight
 if __name__ == '__main__':
+    print("I'm here")
     start_time = time.time()
 
     # define paths
@@ -147,16 +160,18 @@ if __name__ == '__main__':
 
     train_dataset, test_dataset = get_dataset(args)                                 # get dataset
 
-    # Training
-    if args.FL_STAGE == 1:
-        print("| Start FL Training Stage 1|")
-        stage1_training(args, train_dataset, test_dataset)                          # Train ASR & AD Classifier
-        print("| FL Training Stage 1 Done|")
+    if args.EXTRACT != True:                                                        # Training
+        if args.FL_STAGE == 1:
+            print("| Start FL Training Stage 1|")
+            stage1_training(args, train_dataset, test_dataset)                      # Train ASR & AD Classifier
+            print("| FL Training Stage 1 Done|")
 
-    elif args.FL_STAGE == 2:
-        print("| Start FL Training Stage 2|")
-        args.STAGE = 2
-        stage2_training(args, train_dataset, test_dataset)                          # Train Toggling Network
-        print("| FL Training Stage 2 Done|")
+        elif args.FL_STAGE == 2:
+            print("| Start FL Training Stage 2|")
+            args.STAGE = 2
+            stage2_training(args, train_dataset, test_dataset)                      # Train Toggling Network
+            print("| FL Training Stage 2 Done|")
+    else:
+        extract_emb(args, train_dataset, test_dataset)
     
     print('\n Total Run Time: {0:0.4f}'.format(time.time()-start_time))
