@@ -231,6 +231,7 @@ def get_Embs(subset_dataset):
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
                 # 'ASR logits': str(logits["ASR logits"][i].tolist()),
+                # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
                 'hidden_states': logits["hidden_states"][i][:RealLength,:].cpu().numpy(),  #(time-step,node_dimension)
                 'pred_str': pred_str[i]},
                 index=[i])
