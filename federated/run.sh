@@ -2,7 +2,7 @@
 #python src/federated_main.py --model=data2vec --dataset=adress --gpu=1 --pretrain_name "facebook/data2vec-audio-large-960h"\
 #    -model_out "./save/data2vec-audio-large-960h_new1_recall" -log "data2vec-audio-large-960h_new1_recall_FL.txt" \
 #    --AD_loss "recall" --frac=1.0  \
-#    --local_ep 2 --epochs=2 --num_users=2 \
+#    --local_ep 5 --epochs=2 --num_users=2 \
 #    --FL_STAGE 1 
     # 用FL_STAGE取代STAGE
     
@@ -13,7 +13,7 @@ python src/federated_main.py --model=data2vec --dataset=adress --gpu=1 --pretrai
     -model_in "./save/data2vec-audio-large-960h_new1_recall" \
     -model_out "./save/data2vec-audio-large-960h_new2_recall" -log "data2vec-audio-large-960h_new2_recall_FL.txt" \
     --AD_loss "recall" --frac=1.0  \
-    --local_ep 2 --epochs=2 --num_users=2 \
+    --local_ep 5 --epochs=2 --num_users=2 \
     --FL_STAGE 2 # 用FL_STAGE取代STAGE
     # -csv "data2vec-audio-large-960h_new2_recall_FL" (need to be checked)
 
