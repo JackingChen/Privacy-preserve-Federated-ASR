@@ -67,9 +67,10 @@ def compute_metrics(pred):
 
 def Extract_Emb(dataset, GPU_batchsize=16):
     if GPU_batchsize!=None:
+        bs=int(GPU_batchsize)
         df=pd.DataFrame()
-        for i in tqdm(range(0,len(dataset),args.GPU_batchsize)):
-            idxs=list(range(i,min(i+args.GPU_batchsize,len(dataset))))
+        for i in tqdm(range(0,len(dataset),bs)):
+            idxs=list(range(i,min(i+bs,len(dataset))))
             subset_dataset = Subset(dataset, idxs)
             df_data=get_Embs(subset_dataset)
             df = pd.concat([df, df_data], ignore_index=True)
@@ -93,6 +94,7 @@ def get_Embs(subset_dataset):
         # input_values=padded_input_sequences.cuda()
         input_values=padded_input_sequences.to(device)
         logits=model(input_values).logits  
+        .
         asr_lg = logits['ASR logits']
         # 轉換length的度量從sample到output的timestep
         ratio=max(lengths)/asr_lg.shape[1]  # (batchsize, seqlength, logitsize)
@@ -661,7 +663,7 @@ parser.add_argument('-num_off', '--NUM_OFF', type=int, default=None, help="num o
 parser.add_argument('-ap_rt', '--AP_RATIO', type=float, default=0, help="To toggle more or less for aggressive & passive masking")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
-parser.add_argument('--GPU_batchsize', default=64, help="如果cpu滿了就用GPU")
+parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
 
 
 args = parser.parse_args()
@@ -727,7 +729,7 @@ elif model_type == "unispeech":
 
 
 data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
-if args.GPU_batchsize != None:
+if args.GPU_batchsize!=None:
     # ======================
     # model = model.cuda()
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
@@ -753,7 +755,7 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 
 # csv_path = "./saves/results/" + csv_name + ".csv"
 df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
-df_test.to_csv(f"{savePath}/{csv_name}_train.csv")
+df_test.to_csv(f"{savePath}/{csv_name}.csv")
 print("Testing data Done")
 
 

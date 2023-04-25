@@ -39,7 +39,8 @@ from torch.nn.parallel import DataParallel
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Subset
 from tqdm import tqdm
-
+from addict import Dict
+import pickle
 class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
@@ -180,9 +181,10 @@ def compute_metrics(pred):
 
 def Extract_Emb(dataset, GPU_batchsize=16):
     if GPU_batchsize!=None:
+        bs=int(GPU_batchsize)
         df=pd.DataFrame()
-        for i in tqdm(range(0,len(dataset),args.GPU_batchsize)):
-            idxs=list(range(i,min(i+args.GPU_batchsize,len(dataset))))
+        for i in tqdm(range(0,len(dataset),bs)):
+            idxs=list(range(i,min(i+bs,len(dataset))))
             subset_dataset = Subset(dataset, idxs)
             df_data=get_Embs(subset_dataset)
             df = pd.concat([df, df_data], ignore_index=True)
@@ -218,8 +220,8 @@ def get_Embs(subset_dataset):
         # batch["text"] = processor.decode(batch["labels"], group_tokens=False)
         # texts=[processor.decode(batch["labels"], group_tokens=False) for batch in subset_dataset]
         # text=processor.decode(batch["labels"], group_tokens=False)
-
     df = pd.DataFrame()
+    dummy=None
     for i in range(len(subset_dataset)):
         RealLength=oupLens[i]  #只要有從logits取出來的都要還原
         df2 = pd.DataFrame({'path': subset_dataset[i]["path"],                                    # to know which sample
@@ -229,10 +231,11 @@ def get_Embs(subset_dataset):
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
                 # 'ASR logits': str(logits["ASR logits"][i].tolist()),
-                'hidden_states': str(logits["hidden_states"][i][:RealLength,:].tolist()),
+                'hidden_states': logits["hidden_states"][i][:RealLength,:].cpu().numpy(),  #(time-step,node_dimension)
                 'pred_str': pred_str[i]},
                 index=[i])
         df = pd.concat([df, df2], ignore_index=True)
+    
     return df
 
 def map_to_result(batch, idx):
@@ -277,8 +280,8 @@ parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Thre
 parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--AudioLoadFunc', default='librosa', help="用scipy function好像可以比較快")
-parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
-parser.add_argument('--GPU_batchsize', default=64, help="如果cpu滿了就用GPU")
+parser.add_argument('--savepath', default='./saves/results/', help="用scipy function好像可以比較快")
+parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
 
 args = parser.parse_args()
 LAMBDA = args.LAMBDA                    # lambda for GRL
@@ -336,7 +339,7 @@ if args.GPU_batchsize != None:
     # ======================
     # model = model.cuda()
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     if torch.cuda.device_count() > 1:
         model = DataParallel(model)
 
@@ -354,9 +357,9 @@ df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
 if not os.path.exists(savePath):
     os.makedirs(savePath)
 
-df_test.to_csv(f"{savePath}/{csv_name}.csv")
+with open(f"{savePath}/{csv_name}.pkl", "wb") as f:
+    pickle.dump(df_test, f)
 print("Testing data Done")
-
 
 # store result of train data
 train_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
@@ -370,7 +373,8 @@ train_data = train_data.map(prepare_dataset, num_proc=10)
 #     df = pd.concat([df, df2], ignore_index=True)
 #     print("\r"+ str(i), end="")
 df_train=Extract_Emb(train_data,GPU_batchsize=args.GPU_batchsize)
-df_train.to_csv(f"{savePath}/{csv_name}_train.csv")
+with open(f"{savePath}/{csv_name}_train.pkl", "wb") as f:
+    pickle.dump(df_train, f)
 print("Training data Done")
 
 # store result of dev data

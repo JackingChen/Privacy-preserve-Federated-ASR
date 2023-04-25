@@ -68,9 +68,10 @@ def compute_metrics(pred):
     return {"wer": wer}
 def Extract_Emb(dataset, GPU_batchsize=16):
     if GPU_batchsize!=None:
+        bs=int(GPU_batchsize)
         df=pd.DataFrame()
-        for i in tqdm(range(0,len(dataset),args.GPU_batchsize)):
-            idxs=list(range(i,min(i+args.GPU_batchsize,len(dataset))))
+        for i in tqdm(range(0,len(dataset),bs)):
+            idxs=list(range(i,min(i+bs,len(dataset))))
             subset_dataset = Subset(dataset, idxs)
             df_data=get_Embs(subset_dataset)
             df = pd.concat([df, df_data], ignore_index=True)
@@ -134,7 +135,7 @@ parser.add_argument('-model_type', '--model_type', type=str, default="data2vec",
 parser.add_argument('-ad_loss', '--AD_loss', type=str, default="cel", help="loss to use for AD classifier")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
-parser.add_argument('--GPU_batchsize', default=64, help="如果cpu滿了就用GPU")
+parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
 
 args = parser.parse_args()
 LAMBDA = args.LAMBDA                    # lambda for GRL
@@ -564,7 +565,7 @@ if not os.path.exists(savePath):
 
 # csv_path = "./saves/results/" + csv_name + ".csv"
 df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
-df_test.to_csv(f"{savePath}/{csv_name}_train.csv")
+df_test.to_csv(f"{savePath}/{csv_name}.csv")
 print("Testing data Done")
 
 
