@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from transformers.training_args import TrainingArguments
 from transformers import Trainer
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict
 import json
 import numpy as np
 import os
@@ -21,6 +21,7 @@ from jiwer import wer
 import copy
 from transformers import Data2VecAudioConfig, Wav2Vec2Processor
 import copy
+from tensorboardX import SummaryWriter
 
 LOG_DIR = './' #log/'
 
@@ -172,15 +173,15 @@ def map_to_result(batch, processor, model, idx):
     # for toggle
     
     df = pd.DataFrame({'path': batch["path"],                                   # to know which sample
-                       'array': str(batch["array"]),
+                       #'array': str(batch["array"]),
                        'text': batch["text"],                                   # ground truth transcript
                        'dementia_labels': batch["dementia_labels"],
-                       'input_values': str(batch["input_values"]),              # input of the model
-                       'labels': str(batch["labels"]),
-                       'ASR logits': str(logits["ASR logits"].tolist()),
-                       'dementia logits': str(logits["dementia logits"].tolist()),
+                       #'input_values': str(batch["input_values"]),              # input of the model
+                       #'labels': str(batch["labels"]),
+                       #'ASR logits': str(logits["ASR logits"].tolist()),
+                       #'dementia logits': str(logits["dementia logits"].tolist()),
                        'hidden_states': str(logits["hidden_states"].tolist()),
-                       'pred_AD': batch["pred_AD"],                             # AD prediction
+                       #'pred_AD': batch["pred_AD"],                             # AD prediction
                        'pred_str': batch["pred_str"],                           # predicted transcript
                        'dementia_mask': str(logits["dementia_mask"].tolist()),  # ASR-free mask for AD classification
                        'lm_mask': str(logits["lm_mask"].tolist())},             # AD-free mask for ASR task
@@ -394,15 +395,15 @@ def test_inference(args, model, test_dataset):                                  
     return accuracy, loss                                                       # return acc. & total loss
 
 class ASRLocalUpdate(object):
-    def __init__(self, args, dataset, logger, global_test_dataset, client_id, 
+    def __init__(self, args, dataset, global_test_dataset, client_id, 
                  model_in_path, model_out_path):
         self.args = args                                                            # given configuration
-        self.logger = logger
         self.client_train_dataset = self.train_split(dataset, client_id)            # get subset of training set (dataset of THIS client)
         
         self.device = 'cuda' if args.gpu else 'cpu'                                 # use gpu or cpu
         
         self.global_test_dataset = global_test_dataset
+        self.client_test_dataset = self.test_split(global_test_dataset, client_id)  # get subset of testing set (dataset of THIS client)
         self.processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
         self.data_collator = DataCollatorCTCWithPadding(processor=self.processor, padding=True)
         self.client_id = client_id
@@ -434,6 +435,42 @@ class ASRLocalUpdate(object):
         client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
         
         return client_train_dataset
+    
+    def test_split(self, dataset, client_id):
+        # generate sub- testing set for given user-ID
+        if client_id == "public":                                                   # get spk_id for public dataset, 24 PAR (50% of all testing set)
+            client_spks = ['S197', 'S163', 'S193', 'S169', 'S196', 'S184', 'S168', 'S205', 'S185', 'S171', 'S204', 'S173', 'S190', 'S191', 'S203', 
+                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']                                # 12 AD + 12 HC
+
+        elif client_id == 0:                                                        # get spk_id for client 1, 12 PAR (25% of all testing set)
+            client_spks = ['S198', 'S182', 'S194', 'S161', 'S195', 'S170', 'S187', 'S192', 'S178', 'S201', 'S181', 'S174']
+                                                                                    # 6 AD + 6 HC
+        elif client_id == 1:                                                        # get spk_id for client 2, 12 PAR (25% of all testing set)  
+            client_spks = ['S179', 'S188', 'S202', 'S162', 'S172', 'S183', 'S186', 'S207', 'S189', 'S164', 'S176', 'S206']
+                                                                                    # 6 AD + 6 HC
+        else:
+            print("Test with whole dataset!!")
+            return dataset
+        
+        print("Generating client testing set for client ", str(client_id), "...")
+        client_test_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
+        
+        return client_test_dataset
+    
+    def record_result(self, trainer, result_folder):                                # save training loss, testing loss, and testing wer
+        logger = SummaryWriter('../logs/' + result_folder.split("/")[-1])           # use name of this model as folder's name
+
+        for idx in range(len(trainer.state.log_history)):
+            if "loss" in trainer.state.log_history[idx].keys():                     # add in training loss, epoch*100 to obtain int
+                logger.add_scalar('Loss/train', trainer.state.log_history[idx]["loss"], trainer.state.log_history[idx]["epoch"]*100)
+
+            elif "eval_loss" in trainer.state.log_history[idx].keys():              # add in testing loss & WER, epoch*100 to obtain int
+                logger.add_scalar('Loss/test', trainer.state.log_history[idx]["eval_loss"], trainer.state.log_history[idx]["epoch"]*100)
+                logger.add_scalar('wer/test', trainer.state.log_history[idx]["eval_wer"], trainer.state.log_history[idx]["epoch"]*100)
+
+            else:                                                                   # add in final training loss, epoch*100 to obtain int
+                logger.add_scalar('Loss/train', trainer.state.log_history[idx]["train_loss"], trainer.state.log_history[idx]["epoch"]*100)
+        logger.close()
 
     def update_weights(self, global_weights, global_round):
         if global_weights == None:                                                  # train from model from model_in_path
@@ -479,7 +516,7 @@ class ASRLocalUpdate(object):
             gradient_checkpointing=True, 
             save_steps=500, # 500
             eval_steps=500, # 500
-            logging_steps=500, # 500
+            logging_steps=10, # 500
             learning_rate=lr, # self.args.lr
             weight_decay=0.005,
             warmup_steps=1000,
@@ -506,6 +543,7 @@ class ASRLocalUpdate(object):
         print(" | Client ", str(self.client_id), " ready to train! |")
         trainer.train()
         trainer.save_model(save_path + "/final")                                    # save final model
+        self.record_result(trainer, save_path)                           # save training loss, testing loss, and testing wer
 
         # get "network" weights from model in source_path
         if self.args.STAGE == 0:                                                    # train ASR
@@ -517,34 +555,37 @@ class ASRLocalUpdate(object):
          
         return return_weights, trainer.state.log_history[-1]["train_loss"]          # return weight, average losses for this round
 
-    # need to check
-    def inference(self, global_arbitrator):                                                 # given global model
-        """ Returns the inference accuracy and loss.
-        """
-        # load accoring to client_id
-        mask_time_prob = 0                                         # change config to avoid training stopping
+    def extract_embs(self):                                                         # extract emb. using model in args.model_in_path
+        # load model
+        mask_time_prob = 0                                                          # change config to avoid code from stopping
         config = Data2VecAudioConfig.from_pretrained(self.args.pretrain_name, mask_time_prob=mask_time_prob)
-        #print("load global!!!!!!!!!!!!! should change to client model")
-        model = Data2VecAudioForCTC_eval.from_pretrained(self.args.model_out_path + "_" + str(self.client_id) + "/final", config=config, args=self.args) 
-                                                                                            # load local model model for eval
-        model.config.ctc_zero_infinity = True                      # to avoid inf values
+        model = Data2VecAudioForCTC_eval.from_pretrained(self.args.model_in_path, config=config, args=self.args)
+        processor = self.processor
 
-
-        model.eval()
-
-        # evaluate on global testing set
-        #result = self.global_test_dataset.map(lambda x: map_to_result(x, processor=processor, model=model), num_proc=10)
-        df = map_to_result(self.global_test_dataset[0], processor, model, 0)
-        for i in range(len(self.global_test_dataset) - 1):
-            df2 = map_to_result(self.global_test_dataset[i+1], processor, model, i+1)
+        # get emb.s, masks... 1 sample by 1 sample for client test
+        df = map_to_result(self.client_test_dataset[0], processor, model, 0)
+        for i in range(len(self.client_test_dataset) - 1):
+            df2 = map_to_result(self.client_test_dataset[i+1], processor, model, i+1)
             df = pd.concat([df, df2], ignore_index=True)
             print("\r"+ str(i), end="")
 
-        csv_path = "./save/results/" + self.args.csv_path + "_" + str(self.client_id) + "_GlobalTest.csv"
+        csv_path = "./results/" + self.args.csv_path + ".csv"
         df.to_csv(csv_path)
-        WER = wer(df["text"].to_list(), df["pred_str"].to_list())
+        print("Testing data Done")
 
-        return WER                                                   # return WER
+        # get emb.s, masks... 1 sample by 1 sample for client train
+        df = map_to_result(self.client_train_dataset[0], processor, model, 0)
+        for i in range(len(self.client_train_dataset) - 1):
+            df2 = map_to_result(self.client_train_dataset[i+1], processor, model, i+1)
+            df = pd.concat([df, df2], ignore_index=True)
+            print("\r"+ str(i), end="")
+
+        csv_path = "./results/" + self.args.csv_path + "_train.csv"
+        df.to_csv(csv_path)
+        print("Training data Done")
+
+        print(self.args.csv_path + " All Done")
+
     
 
 
