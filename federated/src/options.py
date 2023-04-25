@@ -81,6 +81,11 @@ def args_parser():
     # 2023/02/15: GS_TAU, loss weight
     parser.add_argument('-gs_tau', '--GS_TAU', type=float, default=1, help="Tau for gumbel_softmax")
     parser.add_argument('-w_loss', '--W_LOSS', type=float, default=None, nargs='+', help="weight for HC and AD")
+    # 2023/04/20
+    parser.add_argument('-EXTRACT', '--EXTRACT', action='store_true', default=False, help="True: extract embs")
+    parser.add_argument('-client_id', '--client_id', type=str, default="public", help="client_id: public, 0, or 1")
+    # 2023/04/24
+    parser.add_argument('--global_ep', type=int, default=30, help="number for global model")
     
     args = parser.parse_args()
     return args
