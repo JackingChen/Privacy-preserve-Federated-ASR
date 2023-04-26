@@ -1,6 +1,4 @@
-# eval for data2vec w/ single toggling
 # only data2vec model is used!!!!!!!!!!
-
 import numpy as np
 import torch
 import torch.utils.checkpoint
@@ -41,6 +39,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Subset
 from tqdm import tqdm
 import pickle
+
 def prepare_dataset(batch):
     audio = batch["array"]
 
@@ -52,6 +51,8 @@ def prepare_dataset(batch):
         
     return batch
 
+
+from datasets import load_metric
 wer_metric = load_metric("wer")
 def compute_metrics(pred):
     pred_logits = pred.predictions
@@ -117,28 +118,32 @@ def get_Embs(subset_dataset):
                 'dementia_labels': subset_dataset[i]["dementia_labels"],
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
-                # 'ASR logits': str(logits["ASR logits"][i].tolist()),
                 # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
                 'dementia logits': [logits["dementia logits"][i][:RealLength,:].cpu().numpy()],
                 'hidden_states': [logits["hidden_states"][i][:RealLength,:].cpu().numpy()],  #(time-step,node_dimension)
                 'pred_AD': subset_dataset[i]["pred_AD"],                             # AD prediction
                 'pred_str': pred_str[i],                           # predicted transcript
-                #'dementia_mask': str(logits["dementia_mask"].tolist()),  # ASR-free mask for AD classification
-                'lm_mask': [logits["lm_mask"][i][:RealLength,:].cpu().numpy()]             # AD-free mask for ASR task
+                'dementia_mask': [logits["dementia_mask"][i][:RealLength,:].cpu().numpy()],  # ASR-free mask for AD classification
+                'lm_mask': [logits["lm_mask"][i][:RealLength,:].cpu().numpy()],             # AD-free mask for ASR task
                 },
                 index=[i])
         df = pd.concat([df, df2], ignore_index=True)
     return df
 
+
+##################################
+# choose model type
+##################################    
+import argparse
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current stage")
 parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_FSM_new2/final/", help="Where the model is saved")
-parser.add_argument('-csv', '--csv_path', type=str, default="data2vec-audio-large-960h_SingleToggle", help="name for the csv file")
+parser.add_argument('-csv', '--csv_path', type=str, default="data2vec-audio-large-960h_FSM", help="name for the csv file")
 parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Threshold for AD & ASR")
 parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
-# 2023/01/08: loss type
-parser.add_argument('-ad_loss', '--AD_loss', type=str, default="cel", help="loss to use for AD classifier")
+
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
 parser.add_argument('--savepath', default='./saves/results/', help="用scipy function好像可以比較快")
 parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
@@ -149,13 +154,72 @@ STAGE = args.STAGE                      # stage 1: train AD classifier; stage 2:
 model_dir = args.model_path             # path to load the model
 csv_name = args.csv_path                # path to store the result
 model_type = args.model_type            # select different type of model (here only data2vec is ready to use)
-AD_loss = args.AD_loss                  # type of AD loss: cel, f1, recall, prec, (recall_ori, prec_ori)
 savePath = args.savepath
 
 # threshold for maskes
 AD_THRES = args.threshold
 LM_THRES = args.threshold
 
+# from functions.OtherMdls_FSM import (
+#     Wav2Vec2ForCTC,
+#     Data2VecAudioForCTC,
+#     HubertForCTC,
+#     SEWDForCTC,
+#     UniSpeechSatForCTC
+# )
+def map_to_result(batch, idx):
+    with torch.no_grad():
+        input_values = torch.tensor(batch["input_values"]).unsqueeze(0)            
+        logits = model(input_values).logits                                     # includes ASR logits, dementia logits, hidden_states
+        asr_lg = logits['ASR logits']
+        AD_lg = logits['dementia logits'][0]                                    # (1, time-step, 2) --> (time-step, 2)
+    
+    pred_ad_tstep = torch.argmax(AD_lg, dim=-1)                                 # pred of each time-step
+    pred_ad = pred_ad_tstep.sum() / pred_ad_tstep.size()[0]                     # average result
+    if pred_ad > 0.5:                                                           # if over half of the time pred AD
+        batch["pred_AD"] = 1                                                    # save final result as AD
+    else:
+        batch["pred_AD"] = 0
+    
+    pred_ids = torch.argmax(asr_lg, dim=-1)
+    batch["pred_str"] = processor.batch_decode(pred_ids)[0]                     # predicted transcript
+    batch["text"] = processor.decode(batch["labels"], group_tokens=False)       # ground truth transcript
+    
+    # for FSM
+    
+    df = pd.DataFrame({'path': batch["path"],                                   # to know which sample
+                    #    'array': str(batch["array"]),
+                       'text': batch["text"],                                   # ground truth transcript
+                       'dementia_labels': batch["dementia_labels"],
+                    #    'input_values': str(batch["input_values"]),              # input of the model
+                    #    'labels': str(batch["labels"]),
+                    #    'ASR logits': str(logits["ASR logits"].tolist()),
+                       'dementia logits': str(logits["dementia logits"].tolist()),
+                       'hidden_states': str(logits["hidden_states"].tolist()),
+                       'pred_AD': batch["pred_AD"],                             # AD prediction
+                       'pred_str': batch["pred_str"],                           # predicted transcript
+                       #'dementia_resored': str(logits["dementia_resored"].tolist()),       # masked embedding
+                       #'lm_resored': str(logits["lm_resored"].tolist()),                  # masked embedding
+                       'dementia_mask': str(logits["dementia_mask"].tolist()),  # ASR-free mask for AD classification
+                       'lm_mask': str(logits["lm_mask"].tolist())},             # AD-free mask for ASR task
+                      index=[idx])
+    
+    """
+    # for model w.o. FSM
+    df = pd.DataFrame({'path': batch["path"],                                    # to know which sample
+                    'array': str(batch["array"]),
+                    'text': batch["text"],
+                    'dementia_labels': batch["dementia_labels"],
+                    'input_values': str(batch["input_values"]),               # input of the model
+                    'labels': str(batch["labels"]),
+                    'ASR logits': str(logits["ASR logits"].tolist()),
+                    'dementia logits': str(logits["dementia logits"].tolist()),
+                    'hidden_states': str(logits["hidden_states"].tolist()),
+                    'pred_AD': batch["pred_AD"],                             # AD prediction
+                    'pred_str': batch["pred_str"]},
+                    index=[idx])
+    """
+    return df
 
 class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
     def __init__(self, config):
@@ -173,39 +237,72 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
             )
 
         self.alpha=torch.tensor(LAMBDA)
+        self.dementia_thres = torch.tensor(AD_THRES)
+        self.lm_thres = torch.tensor(LM_THRES)
         print("lambda = ", self.alpha)
+        print("dementia_thres = ", self.dementia_thres)
+        print("lm_thres = ", self.lm_thres)
 
-        # 加toggle network, lm_model
-        self.arbitrator = nn.Linear(config.hidden_size, config.hidden_size*2)    # 2條保護AD資訊（one-hot後用其中一條）
+        # 加lm相關components
+        self.lm_fsm = nn.Linear(config.hidden_size, config.hidden_size)          # 找出對lm重要的feat
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)          # output字母的"機率"
+        self.lm_grl = nn.Linear(config.hidden_size, config.vocab_size)           # 加了GRL那條
         
-        # 加dementia model
+        # 加dementia相關components
+        self.dementia_fsm = nn.Linear(config.hidden_size, config.hidden_size)    # 找出對AD預測重要的feat
         self.dementia_head = nn.Linear(config.hidden_size, 2)                    # 辨識AD
+        self.dementia_grl = nn.Linear(config.hidden_size, 2)                     # 加GRL那條
         
-        # define similarity loss: AM-Softmax, aka div loss (not used here)
+        # define similarity loss: AM-Softmax, aka div loss
         self.criterion_similar = AngularPenaltySMLoss(in_features=config.hidden_size, out_features=2, loss_type='cosface').to('cpu')
         
         # freeze feature_extractor    
         self.freeze_feature_encoder()
 
-        if STAGE == 1:                                                  # freeze all, train AD classifier alone
+        # skip to stage 6
+        if STAGE == 1:                                                           # train FSM
             print("Current stage: 1")
-            self.freeze_data2vec_audio()
+            self.freeze_lm_grl()
+            self.freeze_dementia_grl()
             self.freeze_lm_head()
-            #self.freeze_lm_fsm()
-            self.freeze_arbitrator()
-            self.freeze_criterion_similar()
-        elif STAGE == 2:                                                # freeze all, train toggle network alone
+            self.freeze_dementia_head()
+        elif STAGE == 2:                                                         # train FSM + head
             print("Current stage: 2")
+            self.freeze_lm_grl()
+            self.freeze_dementia_grl()
+        elif STAGE == 3:                                                         # train dementia GRL
+            print("Current stage: 3")
+            self.freeze_data2vec_audio()
+            self.freeze_lm_fsm()
+            self.freeze_dementia_fsm()
+            self.freeze_lm_head()
+            self.freeze_dementia_head()
+            self.freeze_lm_grl()
+        elif STAGE == 4:                                                         # train lm GRL
+            print("Current stage: 4")
+            self.freeze_data2vec_audio()
+            self.freeze_lm_fsm()
+            self.freeze_dementia_fsm()
+            self.freeze_lm_head()
+            self.freeze_dementia_head()
+            self.freeze_dementia_grl()
+        elif STAGE == 5:                                                         # train lm_FSM
+            self.freeze_data2vec_audio()
+            self.freeze_dementia_fsm()            
+            self.freeze_criterion_similar()
+            self.freeze_lm_head()
+            self.freeze_dementia_head()            
+            self.freeze_lm_grl()
+            self.freeze_dementia_grl()
+        elif STAGE == 6:                                                         # train 2 FSM
+            print("Current stage: new 2")
             self.freeze_data2vec_audio()
             self.freeze_lm_head()
             self.freeze_dementia_head()
             self.freeze_criterion_similar()
-        elif STAGE == 3:                                                # freeze all, train FSM + classifiers
-            print("Current stage: 3")
-            self.freeze_data2vec_audio()
-            self.freeze_criterion_similar()           
-
+            self.freeze_lm_grl()
+            self.freeze_dementia_grl()
+            
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -225,12 +322,17 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         self.criterion_similar.eval()
         for param in self.criterion_similar.parameters():
             param.requires_grad = False
-    """        
+            
     def freeze_lm_fsm(self):
         self.lm_fsm.eval()
         for param in self.lm_fsm.parameters():
             param.requires_grad = False
-    """        
+            
+    def freeze_dementia_fsm(self):
+        self.dementia_fsm.eval()
+        for param in self.dementia_fsm.parameters():
+            param.requires_grad = False
+            
     def freeze_lm_head(self):
         self.lm_head.eval()
         for param in self.lm_head.parameters():
@@ -240,12 +342,16 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         self.dementia_head.eval()
         for param in self.dementia_head.parameters():
             param.requires_grad = False
-    
-    def freeze_arbitrator(self):
-        self.arbitrator.eval()
-        for param in self.arbitrator.parameters():
-            param.requires_grad = False       
-
+   
+    def freeze_lm_grl(self):
+        self.lm_grl.eval()
+        for param in self.lm_grl.parameters():
+            param.requires_grad = False
+ 
+    def freeze_dementia_grl(self):
+        self.dementia_grl.eval()
+        for param in self.dementia_grl.parameters():
+            param.requires_grad = False
 
     # @add_start_docstrings_to_model_forward(DATA2VEC_AUDIO_INPUTS_DOCSTRING)
     # @add_code_sample_docstrings(
@@ -275,7 +381,7 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         """
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        
+
         outputs = self.data2vec_audio(
             input_values,
             attention_mask=attention_mask,
@@ -287,58 +393,65 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
         hidden_states = outputs[0]
         hidden_states = self.dropout(hidden_states)
 
-        # 沒過FSM，用來單獨train AD classifier
-        dementia_logits_unmask = self.dementia_head(hidden_states) # for stage 1 training
-
         # hidden_states: data2vec_audio embedding
-        ###################
         # 製造mask
-        ###################
-        """
         m = nn.Sigmoid()
-        lm_score = m(self.lm_fsm(hidden_states))             # score range from 0~1
-        lm_mask = torch.where(lm_score >= self.lm_thres.to(lm_score.device), torch.tensor(1.0).to(lm_score.device), torch.tensor(0.0).to(lm_score.device))                   # if condition, 1. else, 0
-        lm_mask = lm_mask + 0 * self.lm_fsm(lm_mask) # to has grad?
-        """
-        #m = nn.Sigmoid()
-        #all_score = m(self.arbitrator(hidden_states))             # score range from 0~1
-        all_score = self.arbitrator(hidden_states)
-        """
-        all_mask = torch.where(all_score >= self.lm_thres.to(all_score.device), torch.tensor(1.0).to(all_score.device), torch.tensor(0.0).to(all_score.device))                   # if condition, 1. else, 0
-        all_mask = all_mask + 0 * self.arbitrator(hidden_states) # to have grad?  
-        """
-        # use Gunbel softmax
-        #print(all_score)
-        lm_score = torch.stack((all_score[:, :, :self.config.hidden_size] , all_score[:, :, self.config.hidden_size:self.config.hidden_size*2]), -1)     # first part for lm, size = [batch_size, time-step, hidden_state, 2]
-       
-        #lm_mask = torch.nn.functional.gumbel_softmax(lm_score, hard=True, dim=-1)[:, :, :, 0] # back to [batch_size, time-step, hidden_state]
-        lm_mask = gumbel_softmax(lm_score, hard=True, dim=-1)[:, :, :, 0]
+        dementia_score = m(self.dementia_fsm(hidden_states))            # score range from 0~1
+        lm_score = m(self.lm_fsm(hidden_states))                        # score range from 0~1
+        
+        # if score >= thredhold, mask = 1
+        dementia_mask = torch.where(dementia_score >= self.dementia_thres.to(dementia_score.device), torch.tensor(1.0).to(dementia_score.device), torch.tensor(0.0).to(dementia_score.device))  # if condition, 1. else, 0
+        lm_mask = torch.where(lm_score >= self.lm_thres.to(lm_score.device), torch.tensor(1.0).to(lm_score.device), torch.tensor(0.0).to(lm_score.device))                                      # if condition, 1. else, 0
+        lm_mask = lm_mask + 0 * self.lm_fsm(lm_mask)                    # to has grad?
+        dementia_mask = dementia_mask + 0 * self.lm_fsm(lm_mask)        # to has grad?
 
+        # 拿score vector 跟原本的hidden_states點乘
+        #dementia_resored = dementia_score*hidden_states
+        #lm_resored = lm_score*hidden_states
+        
         ##################################
         # 拿mask跟原本的hidden_states點乘 #
         ##################################
-        """
+        dementia_masked = dementia_mask*hidden_states
         lm_masked = lm_mask*hidden_states
-        """
-        lm_masked = lm_mask*hidden_states
-
+        
         ##############
         # head(clf)
         ##############
-        """
+        #dementia_logits = self.dementia_head(dementia_resored) #******************* torch.Size([2, 1327, 32]) (batchsize, timestep, feature_dimention)
+        #logits = self.lm_head(lm_resored)
+        dementia_logits = self.dementia_head(dementia_masked) #******************* torch.Size([2, 1327, 32]) (batchsize, timestep, feature_dimention)
         logits = self.lm_head(lm_masked)
-        dementia_logits = self.dementia_head(lm_masked) # masked hidden state 過AD classifier
-        dementia_output_mean_2r = torch.mean(dementia_logits,dim=1)
-        dementia_output_mean_r = ReverseLayerF.apply(dementia_output_mean_2r, self.alpha)
-        dementia_output_mean = torch.mean(dementia_logits_unmask,dim=1)
-        """
-        logits = self.lm_head(lm_masked)                                                    # ASR loss
-        dementia_logits = self.dementia_head(lm_masked)                                     # for AD GRL
-        
-        dementia_output_mean_2r = torch.mean(dementia_logits,dim=1)
-        dementia_output_mean_r = ReverseLayerF.apply(dementia_output_mean_2r, self.alpha)   # for AD GRL
-        dementia_output_mean_unmask = torch.mean(dementia_logits_unmask,dim=1)              # unmask
+        # del dementia_resored, lm_resored
+        dementia_output_mean = torch.mean(dementia_logits,dim=1)
 
+        ##############
+        # grl(dis)
+        ##############
+        hidden_states_r = ReverseLayerF.apply(hidden_states, self.alpha)
+        # get score from reversed embedding
+        dementia_score_r = m(self.dementia_fsm(hidden_states_r))            # score range from 0~1
+        lm_score_r = m(self.lm_fsm(hidden_states_r))                        # score range from 0~1
+        # if score >= thredhold, mask = 1
+        dementia_mask_r = torch.where(dementia_score_r >= self.dementia_thres.to(dementia_score_r.device), torch.tensor(1.0).to(dementia_score_r.device), torch.tensor(0.0).to(dementia_score_r.device)) # if condition, 1. else, 0
+        lm_mask_r = torch.where(lm_score_r >= self.lm_thres.to(lm_score_r.device), torch.tensor(1.0).to(lm_score_r.device), torch.tensor(0.0).to(lm_score_r.device))                   # if condition, 1. else, 0
+        
+        del dementia_score_r, lm_score_r
+        #####################################
+        # 拿mask跟reversed hidden_states點乘 #
+        #####################################
+        dementia_masked_r = dementia_mask_r*hidden_states_r
+        lm_masked_r = lm_mask_r*hidden_states_r
+        
+        del hidden_states_r, dementia_mask_r, lm_mask_r
+        # grl(dis)
+        dementia_logits_r = self.dementia_grl(lm_masked_r) #******************* torch.Size([2, 1327, 32]) (batchsize, timestep, feature_dimention)
+        logits_r = self.lm_grl(dementia_masked_r)
+        del dementia_masked_r, lm_masked_r
+        
+        dementia_output_mean_r = torch.mean(dementia_logits_r,dim=1)
+        #del dementia_logits_r, dementia_logits
+        del dementia_logits_r
         #*******************
         
         final_loss = None
@@ -361,7 +474,7 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
 
             # ctc_loss doesn't support fp16
             log_probs = nn.functional.log_softmax(logits, dim=-1, dtype=torch.float32).transpose(0, 1)
-            
+            log_probs_r = nn.functional.log_softmax(logits_r, dim=-1, dtype=torch.float32).transpose(0, 1)
             with torch.backends.cudnn.flags(enabled=False):
                 loss = nn.functional.ctc_loss(
                     log_probs,
@@ -372,138 +485,78 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
                     reduction=self.config.ctc_loss_reduction,
                     zero_infinity=self.config.ctc_zero_infinity,
                 )
-                #  /////
-                # gradient reversal layers(GRL)
-                if AD_loss == "cel":
-                    #print("loss: cel")
-                    loss_fn = nn.CrossEntropyLoss()
-                    
-                    dementia_loss_unmask = loss_fn(dementia_output_mean_unmask, dementia_labels)        # unmask
-                    dementia_loss_rev = loss_fn(dementia_output_mean_r, dementia_labels)                # reverse
-                elif AD_loss == "recall":                 
-                    #print("loss: recall")
-                    loss_fn = RecallLoss(weight=[0.1, 0.9])                                             # true label = 1 (AD) 的預測"機率"越大越好
-                    #loss = criterion(y_predict, y_target)
-                    # predict: [N, C, *]    ; target: [N, *]
-                    dementia_loss_unmask = loss_fn(dementia_output_mean_unmask, dementia_labels)        # unmask: [batch_size, 2], [batch_size,]
-                    #print("dementia_output_mean_unmask: ", dementia_output_mean_unmask)
-                    #print("dementia_labels: ", dementia_labels)
-                    #print("dementia_loss: ", dementia_loss_unmask)
-                    
-                    dementia_loss_rev = loss_fn(dementia_output_mean_r, dementia_labels)                # reverse: [batch_size, 2], [batch_size,]
-
-                elif AD_loss == "prec":                 
-                    print("NO prec loss yet!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-                    #print("loss: precision")
-                    #loss_fn = nn.CrossEntropyLoss(weight=[1, 0])
-                    
-                    #dementia_loss = loss_fn(dementia_output_mean, dementia_labels)                      # AD classifier
-                    #dementia_loss_unmask = loss_fn(dementia_output_mean_unmask, dementia_labels)        # unmask
-                    #dementia_loss_rev = loss_fn(dementia_output_mean_r, dementia_labels)                # reverse
-                # att loss
-                #Att_loss = FSMatt_loss(lm_mask, AD_mask)
+                # loss for lm_grl
+                
+                loss_r = nn.functional.ctc_loss(
+                    log_probs_r,
+                    flattened_targets,
+                    input_lengths,
+                    target_lengths,
+                    blank=self.config.pad_token_id,
+                    reduction=self.config.ctc_loss_reduction,
+                    zero_infinity=self.config.ctc_zero_infinity,
+                )
+                
+                loss_fn = nn.CrossEntropyLoss()
+                
+                dementia_loss = loss_fn(dementia_output_mean, dementia_labels)        # loss for AD
+                dementia_loss_rev = loss_fn(dementia_output_mean_r, dementia_labels)  # AD-GRL
+                
+                # FSM att loss
+                # Scorematrix = append([dementia_mask,lm_mask]) # torch.Size([2, embedding_size])
+                # Att_loss = Scorematrix*Scorematrix - Identity matrix
+                #Att_loss = FSMatt_loss(lm_score, dementia_score)
+                Att_loss = FSMatt_loss(lm_mask, dementia_mask)                        # use mask to compute attention loss
+                # del lm_mask, dementia_mask
                 # diversity loss: AM-Softmax
-                #scores = torch.cat((hidden_states * lm_mask, hidden_states * AD_mask), dim=0)
-                #am_labels = torch.cat((torch.zeros(len(hidden_states), dtype=torch.long), torch.ones(len(hidden_states), dtype=torch.long)), dim=0).to('cpu')
-                #print("scores size: ", scores.size())
-                #print("labels size: ", am_labels.size())
-                #del hidden_states
-                #lm_masked = hidden_states * lm_mask
-                #AD_masked = hidden_states * AD_mask
-                #lm_masked = torch.reshape(lm_masked, (lm_masked.size()[0]*lm_masked.size()[1], lm_masked.size()[2])) # batch_size*time-step, hidden_size
-                #AD_masked = torch.reshape(AD_masked, (AD_masked.size()[0]*AD_masked.size()[1], AD_masked.size()[2])) # batch_size*time-step, hidden_size
+                lm_masked = hidden_states * lm_mask
+                AD_masked = hidden_states * dementia_mask
+                lm_masked = torch.reshape(lm_masked, (lm_masked.size()[0]*lm_masked.size()[1], lm_masked.size()[2])) # to size [batch_size*time-step, hidden_size]
+                AD_masked = torch.reshape(AD_masked, (AD_masked.size()[0]*AD_masked.size()[1], AD_masked.size()[2])) # to size [batch_size*time-step, hidden_size]
                 #print("lm_masked size: ", lm_masked.size())
                 #print("AD_masked size: ", AD_masked.size())
 
-                #scores = torch.cat((lm_masked, AD_masked), dim=0) # batch_size*time-step * 2, hidden_size
+                scores = torch.cat((lm_masked, AD_masked), dim=0) # size: [batch_size*time-step * 2, hidden_size]
                 #print("score size: ", scores.size())
-                #am_labels = torch.cat((torch.zeros(len(lm_masked), dtype=torch.long), torch.ones(len(AD_masked), dtype=torch.long)), dim=0).to('cpu') # batch_size*time-step * 2
+                am_labels = torch.cat((torch.zeros(len(lm_masked), dtype=torch.long), torch.ones(len(AD_masked), dtype=torch.long)), dim=0).to('cpu') # [batch_size*time-step * 2] w/ 1st half being 0s, and 2nd half being 1s
                 #print("am_labels size: ", am_labels.size())
                 #print(am_labels)
 
                 # should feed x: [batch_size, hidden_size] & labels: [batch_size] simply use num, no need to one-hot
-                #similarity, _ = self.criterion_similar(scores, am_labels)
-                #score_loss = similarity # * args.w_score if args.w_score > 0. else torch.tensor(0.).to(device)
-                
-                #print("========================")
-                #print(AD_mask, lm_mask)
-                #print(loss, dementia_loss_rev, loss_r, dementia_loss, Att_loss, score_loss)
+                similarity, _ = self.criterion_similar(scores, am_labels)
+                score_loss = similarity # * args.w_score if args.w_score > 0. else torch.tensor(0.).to(device)
 
-                if STAGE == 1:                                                  # train AD classifier
+                if STAGE == 1:                                                  # train FSM
                     #print("Current stage: 1")
-                    final_loss = dementia_loss_unmask
-                    #print("final loss: ", final_loss)
-                elif STAGE == 2:                                                # train FSM
+                    final_loss = loss + dementia_loss + score_loss + Att_loss
+                elif STAGE == 2:                                                # train ASR
                     #print("Current stage: 2")
-                    final_loss = loss + dementia_loss_rev  #+ Att_loss #+ score_loss + loss_r + dementia_loss + score_loss
-                    #print(loss, dementia_loss_rev, loss_r, dementia_loss, l2_lambda * l2_norm)
-                    #final_loss = loss + dementia_loss_rev + loss_r + dementia_loss + l2_lambda * l2_norm
-                    #final_loss = l2_lambda * l2_norm
-                elif STAGE == 3:
-                    final_loss = loss + dementia_loss_rev #+ loss_r + dementia_loss #+ Att_loss + score_loss
+                    final_loss = loss + dementia_loss + score_loss + Att_loss
+                elif STAGE == 3:                                                # train dementia GRL
+                    #print("Current stage: 3")
+                    final_loss = dementia_loss_rev
+                elif STAGE == 4:
+                    final_loss = loss_r
+                elif STAGE == 5:
+                    # train encoder
+                    #final_loss = loss + dementia_loss + score_loss + Att_loss + dementia_loss_rev + loss_r
+                    # train lm_FSM
+                    final_loss = loss + dementia_loss_rev
+                    # train dementia_FSM
+                    #final_loss = dementia_loss + loss_r
+                elif STAGE == 6:                                                # ASR loss, AD Loss (CE), diversity loss, and attention loss
+                    final_loss = loss + dementia_loss + score_loss + Att_loss
                 # ////
         if not return_dict:
             output = (logits,) + outputs[_HIDDEN_STATES_START_POSITION:]
 
         # return info that we might need
         logits_all = {'ASR logits': logits, 'dementia logits': dementia_logits, 'hidden_states': hidden_states,
-                    'lm_mask': lm_mask}
+                    'lm_mask': lm_mask, 'dementia_mask': dementia_mask}
 
         return CausalLMOutput(
             loss=final_loss, logits=logits_all, hidden_states=outputs.hidden_states, attentions=outputs.attentions
         )
-
-def map_to_result(batch, idx):
-    with torch.no_grad():
-        input_values = torch.tensor(batch["input_values"]).unsqueeze(0)            
-        logits = model(input_values).logits                                     # includes ASR logits, dementia logits, hidden_states
-        asr_lg = logits['ASR logits']
-        AD_lg = logits['dementia logits'][0]                                    # (1, time-step, 2) --> (time-step, 2)
-    
-    pred_ad_tstep = torch.argmax(AD_lg, dim=-1)                                 # pred of each time-step
-    pred_ad = pred_ad_tstep.sum() / pred_ad_tstep.size()[0]                     # average result
-    if pred_ad > 0.5:                                                           # if over half of the time pred AD
-        batch["pred_AD"] = 1                                                    # save final result as AD
-    else:
-        batch["pred_AD"] = 0
-    
-    pred_ids = torch.argmax(asr_lg, dim=-1)
-    batch["pred_str"] = processor.batch_decode(pred_ids)[0]                     # predicted transcript
-    batch["text"] = processor.decode(batch["labels"], group_tokens=False)       # ground truth transcript
-    
-    # for single toggle
-    
-    df = pd.DataFrame({'path': batch["path"],                                   # to know which sample
-                    #    'array': str(batch["array"]),
-                       'text': batch["text"],                                   # ground truth transcript
-                       'dementia_labels': batch["dementia_labels"],
-                    #    'input_values': str(batch["input_values"]),              # input of the model
-                    #    'labels': str(batch["labels"]),
-                    #    'ASR logits': str(logits["ASR logits"].tolist()),
-                       'dementia logits': str(logits["dementia logits"].tolist()),
-                       'hidden_states': str(logits["hidden_states"].tolist()),
-                       'pred_AD': batch["pred_AD"],                             # AD prediction
-                       'pred_str': batch["pred_str"],                           # predicted transcript
-                       #'dementia_mask': str(logits["dementia_mask"].tolist()),  # ASR-free mask for AD classification
-                       'lm_mask': str(logits["lm_mask"].tolist())},             # AD-free mask for ASR task
-                      index=[idx])
-    
-    """
-    # for model w.o. FSM
-    df = pd.DataFrame({'path': batch["path"],                                    # to know which sample
-                    'array': str(batch["array"]),
-                    'text': batch["text"],
-                    'dementia_labels': batch["dementia_labels"],
-                    'input_values': str(batch["input_values"]),               # input of the model
-                    'labels': str(batch["labels"]),
-                    'ASR logits': str(logits["ASR logits"].tolist()),
-                    'dementia logits': str(logits["dementia logits"].tolist()),
-                    'hidden_states': str(logits["hidden_states"].tolist()),
-                    'pred_AD': batch["pred_AD"],                             # AD prediction
-                    'pred_str': batch["pred_str"]},
-                    index=[idx])
-    """
-    return df
 
 # load according to model type
 # note that only data2vec is done for this version
@@ -562,6 +615,9 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 
 if not os.path.exists(savePath):
     os.makedirs(savePath)
+
+
+
 # get emb.s, masks... 1 sample by 1 sample
 # df = map_to_result(test_data[0], 0)
 # for i in range(len(test_data) - 1):
@@ -574,7 +630,6 @@ df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
 with open(f"{savePath}/{csv_name}.pkl", "wb") as f:
     pickle.dump(df_test, f)
 print("Testing data Done")
-
 
 # store result of train data
 train_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),

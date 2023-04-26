@@ -38,6 +38,8 @@ from torch.nn.parallel import DataParallel
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Subset
 from tqdm import tqdm
+import pickle
+
 def prepare_dataset(batch):
     audio = batch["array"]
 
@@ -95,6 +97,7 @@ def get_Embs(subset_dataset):
         input_values=padded_input_sequences.to(device)
         logits=model(input_values).logits  
         asr_lg = logits['ASR logits']
+        AD_lg = logits['dementia logits']                                    # (batchsize, time-step, 2) --> (time-step, 2)
         # 轉換length的度量從sample到output的timestep
         ratio=max(lengths)/asr_lg.shape[1]  # (batchsize, seqlength, logitsize)
         oupLens=[int(l/ratio) for l in lengths]
@@ -110,15 +113,26 @@ def get_Embs(subset_dataset):
     df = pd.DataFrame()
     for i in range(len(subset_dataset)):
         RealLength=oupLens[i]  #只要有從logits取出來的都要還原
+        pred_ad_tstep = torch.argmax(AD_lg[i][:RealLength,:], dim=-1)# pred of each time-step
+        pred_ad = pred_ad_tstep.sum() / pred_ad_tstep.size()[0]      # average result (batchsize, )
+        AD_prediction = 1 if pred_ad > 0.5 else 0
+        # subset_dataset[i]["pred_AD"] = 1 if pred_ad > 0.5 else 0
+
         df2 = pd.DataFrame({'path': subset_dataset[i]["path"],                                    # to know which sample
                 # 'array': str(subset_dataset[i]["array"]),
                 'text': subset_dataset[i]["text"],
                 'dementia_labels': subset_dataset[i]["dementia_labels"],
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
-                # 'ASR logits': str(logits["ASR logits"][i].tolist()),
-                'hidden_states': str(logits["hidden_states"][i][:RealLength,:].tolist()),
-                'pred_str': pred_str[i]},
+                # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
+                'dementia logits': [logits["dementia logits"][i][:RealLength,:].cpu().numpy()],
+                'hidden_states': [logits["hidden_states"][i][:RealLength,:].cpu().numpy()],  #(time-step,node_dimension)
+                # 'pred_AD': subset_dataset[i]["pred_AD"],                             # AD prediction
+                'pred_AD': AD_prediction,
+                'pred_str': pred_str[i],                           # predicted transcript
+                'dementia_mask': [logits["dementia_mask"][i][:RealLength,:].cpu().numpy()],  # ASR-free mask for AD classification
+                'lm_mask': [logits["lm_mask"][i][:RealLength,:].cpu().numpy()],             # AD-free mask for ASR task
+                },
                 index=[i])
         df = pd.concat([df, df2], ignore_index=True)
     return df
@@ -132,13 +146,13 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current stage")
-parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_SingleToggle/final/", help="Where the model is saved")
+parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_FSM_new2/final/", help="Where the model is saved")
 parser.add_argument('-csv', '--csv_path', type=str, default="data2vec-audio-large-960h_FSM", help="name for the csv file")
 parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Threshold for AD & ASR")
 parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
 
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
-parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
+parser.add_argument('--savepath', default='./saves/results/', help="用scipy function好像可以比較快")
 parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
 
 args = parser.parse_args()
@@ -593,7 +607,7 @@ if args.GPU_batchsize != None:
     # ======================
     # model = model.cuda()
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     if torch.cuda.device_count() > 1:
         model = DataParallel(model)
 
@@ -609,6 +623,8 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 if not os.path.exists(savePath):
     os.makedirs(savePath)
 
+
+
 # get emb.s, masks... 1 sample by 1 sample
 # df = map_to_result(test_data[0], 0)
 # for i in range(len(test_data) - 1):
@@ -618,7 +634,8 @@ if not os.path.exists(savePath):
 
 # csv_path = "./saves/results/" + csv_name + ".csv"
 df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
-df_test.to_csv(f"{savePath}/{csv_name}.csv")
+with open(f"{savePath}/{csv_name}.pkl", "wb") as f:
+    pickle.dump(df_test, f)
 print("Testing data Done")
 
 # store result of train data
@@ -635,7 +652,8 @@ train_data = train_data.map(prepare_dataset, num_proc=10)
 
 # csv_path = "./saves/results/" + csv_name + "_train.csv"
 df_train=Extract_Emb(train_data,GPU_batchsize=args.GPU_batchsize)
-df_train.to_csv(f"{savePath}/{csv_name}_train.csv")
+with open(f"{savePath}/{csv_name}_train.pkl", "wb") as f:
+    pickle.dump(df_train, f)
 print("Training data Done")
 
 # store result of dev data

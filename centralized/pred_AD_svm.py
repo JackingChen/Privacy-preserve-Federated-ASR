@@ -76,19 +76,21 @@ def df2xy(df_data, feat_col="hidden_states"):
         #print(re[i].shape)0
         print("\r"+ str(idx+1), end="")
     print(" ")
-    x_train = pd.DataFrame(re, columns=[feat_col]).hidden_states.tolist() # masked_hidden_states to list
+    x_train = pd.DataFrame(re, columns=[feat_col])[feat_col].tolist() # masked_hidden_states to list
     y_train = pd.DataFrame(df_data["dementia_labels"])
     return x_train,y_train
+
 def df2xy_masked(df_data, feat_col="masked_hidden_states"):
     # re = df_train.hidden_states * df_train.lm_mask
-    re = df_data.hidden_states.copy()  * df_data.lm_mask.copy()
+    re = df_data.hidden_states.copy() * df_data.lm_mask.copy()
+    # re = df_data.hidden_states.copy()
     for idx, i in enumerate(df_data.index.tolist()):
         re[i] = pooling_func(re[i], axis=0)# 平均成(1, hidden_size)
         #  = data[0]                                                      # 轉成(hidden_size)
         #print(re[i].shape)0
         print("\r"+ str(idx+1), end="")
     print(" ")
-    x_train = pd.DataFrame(re, columns=[feat_col]).hidden_states.tolist() # masked_hidden_states to list
+    x_train = pd.DataFrame(re, columns=[feat_col])[feat_col].tolist() # masked_hidden_states to list
     y_train = pd.DataFrame(df_data["dementia_labels"])
     return x_train,y_train
 parser = argparse.ArgumentParser()
@@ -168,6 +170,7 @@ if 'lm_mask' in df_train.columns:                                             # 
     # x_test = pd.DataFrame(re, columns=["masked_hidden_states"]).masked_hidden_states.tolist() # masked_hidden_states to list
     # y_test = pd.DataFrame(df_test["dementia_labels"])
     # trainSVM(x_train, y_train, x_test, y_test, df_test, args.model_name + "_masked_INV_" + str(args.INV) + "_" + sqz, outdir=args.rsltOut_dir)
+    print("Using masked Embeddings")
 else:                                                                         # train w/ un-masked emb.
     x_train,y_train=df2xy(df_train, feat_col="hidden_states")
     x_test,y_test=df2xy(df_test, feat_col="hidden_states")

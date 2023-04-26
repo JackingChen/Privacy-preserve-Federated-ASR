@@ -232,11 +232,10 @@ def get_Embs(subset_dataset):
                 # 'labels': str(subset_dataset[i]["labels"]),
                 # 'ASR logits': str(logits["ASR logits"][i].tolist()),
                 # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
-                'hidden_states': logits["hidden_states"][i][:RealLength,:].cpu().numpy(),  #(time-step,node_dimension)
+                'hidden_states': [logits["hidden_states"][i][:RealLength,:].cpu().numpy()],  #(time-step,node_dimension)
                 'pred_str': pred_str[i]},
                 index=[i])
         df = pd.concat([df, df2], ignore_index=True)
-    
     return df
 
 def map_to_result(batch, idx):
@@ -276,7 +275,7 @@ def map_to_result(batch, idx):
 parser = argparse.ArgumentParser()
 parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda for GRL")
 parser.add_argument('-st', '--STAGE', type=int, default=1, help="Current stage")
-# parser.add_argument('-model', '--model_path', type=str, default="data2vec", help="Where the model is saved")
+parser.add_argument('-model', '--model_path', type=str, default="/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/saves/data2vec-audio-large-960h_finetuned/final/", help="Where the model is saved")
 parser.add_argument('-thres', '--threshold', type=float, default=0.5, help="Threshold for AD & ASR")
 parser.add_argument('-model_type', '--model_type', type=str, default="data2vec", help="Type of the model")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
@@ -287,7 +286,7 @@ parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu�
 args = parser.parse_args()
 LAMBDA = args.LAMBDA                    # lambda for GRL
 STAGE = args.STAGE                      # stage 1: train AD classifier; stage 2: train toggling network
-# model_dir = args.model_path             # path to load the model
+model_dir = args.model_path             # path to load the model
 model_type = args.model_type            # select different type of model (here only data2vec is ready to use)
 savePath = args.savepath
 
@@ -309,7 +308,7 @@ elif model_type == "data2vec":
     csv_name=name.split('/')[-1]
     mask_time_prob = 0                                                                     # change config to avoid code from stopping
     config = Data2VecAudioConfig.from_pretrained(name, mask_time_prob=mask_time_prob)
-    model = Data2VecAudioForCTC.from_pretrained(name, config=config)
+    model = Data2VecAudioForCTC.from_pretrained(model_dir, config=config)
     processor = Wav2Vec2Processor.from_pretrained(name)
 
 elif model_type == "hubert":

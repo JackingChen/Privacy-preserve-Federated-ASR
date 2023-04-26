@@ -38,7 +38,7 @@ from torch.nn.parallel import DataParallel
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Subset
 from tqdm import tqdm
-
+import pickle
 def prepare_dataset(batch):
     audio = batch["array"]
 
@@ -94,7 +94,7 @@ def get_Embs(subset_dataset):
         # input_values=padded_input_sequences.cuda()
         input_values=padded_input_sequences.to(device)
         logits=model(input_values).logits  
-        .
+        
         asr_lg = logits['ASR logits']
         # 轉換length的度量從sample到output的timestep
         ratio=max(lengths)/asr_lg.shape[1]  # (batchsize, seqlength, logitsize)
@@ -118,8 +118,14 @@ def get_Embs(subset_dataset):
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
                 # 'ASR logits': str(logits["ASR logits"][i].tolist()),
-                'hidden_states': str(logits["hidden_states"][i][:RealLength,:].tolist()),
-                'pred_str': pred_str[i]},
+                # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
+                'dementia logits': [logits["dementia logits"][i][:RealLength,:].cpu().numpy()],
+                'hidden_states': [logits["hidden_states"][i][:RealLength,:].cpu().numpy()],  #(time-step,node_dimension)
+                'pred_AD': subset_dataset[i]["pred_AD"],                             # AD prediction
+                'pred_str': pred_str[i],                           # predicted transcript
+                'dementia_mask': [logits["dementia_mask"][i][:RealLength,:].cpu().numpy()],  # ASR-free mask for AD classification
+                'lm_mask': [logits["lm_mask"][i][:RealLength,:].cpu().numpy()],# AD-free mask for ASR task
+                },             
                 index=[i])
         df = pd.concat([df, df2], ignore_index=True)
     return df
@@ -662,7 +668,7 @@ parser.add_argument('-num_off', '--NUM_OFF', type=int, default=None, help="num o
 # 2023/03/07: ratio for aggressive & passive masking
 parser.add_argument('-ap_rt', '--AP_RATIO', type=float, default=0, help="To toggle more or less for aggressive & passive masking")
 parser.add_argument('-RD', '--root_dir', default='/mnt/Internal/FedASR/Data/ADReSS-IS2020-data', help="Learning rate")
-parser.add_argument('--savepath', default='./EmbFeats/', help="用scipy function好像可以比較快")
+parser.add_argument('--savepath', default='./saves/results/', help="用scipy function好像可以比較快")
 parser.add_argument('--GPU_batchsize', type=str, default=None, help="如果cpu滿了就用GPU")
 
 
@@ -733,7 +739,7 @@ if args.GPU_batchsize!=None:
     # ======================
     # model = model.cuda()
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     if torch.cuda.device_count() > 1:
         model = DataParallel(model)
 
@@ -755,7 +761,8 @@ test_data = test_data.map(prepare_dataset, num_proc=10)
 
 # csv_path = "./saves/results/" + csv_name + ".csv"
 df_test=Extract_Emb(test_data,GPU_batchsize=args.GPU_batchsize)
-df_test.to_csv(f"{savePath}/{csv_name}.csv")
+with open(f"{savePath}/{csv_name}.pkl", "wb") as f:
+    pickle.dump(df_test, f)
 print("Testing data Done")
 
 
@@ -773,7 +780,8 @@ train_data = train_data.map(prepare_dataset, num_proc=10)
 
 # csv_path = "./saves/results/" + csv_name + "_train.csv"
 df_train=Extract_Emb(train_data,GPU_batchsize=args.GPU_batchsize)
-df_train.to_csv(f"{savePath}/{csv_name}_train.csv")
+with open(f"{savePath}/{csv_name}_train.pkl", "wb") as f:
+    pickle.dump(df_train, f)
 print("Training data Done")
 
 # store result of dev data
