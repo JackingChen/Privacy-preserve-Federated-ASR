@@ -1,0 +1,15 @@
+addict==2.4.0
+datasets==1.12.1
+jiwer==3.0.1
+librosa==0.9.1
+matplotlib==3.5.2
+Models==0.9.7
+numpy==1.22.2
+pandas==1.4.2
+python_Levenshtein==0.21.0
+scikit_learn==1.2.2
+tensorboardX==2.6
+torch==1.7.1+cu110
+torchvision==0.8.2+cu110
+tqdm==4.64.0
+transformers==4.17.0
