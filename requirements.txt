@@ -40,8 +40,8 @@ fsspec==2022.3.0
 future==0.18.2
 gast==0.4.0
 google==2.0.3
-google-auth==1.35.0
-google-auth-oauthlib==0.4.6
+google-auth==2.17.3
+google-auth-oauthlib==1.0.0
 google-pasta==0.2.0
 grpcio==1.54.0
 h5py==3.8.0
@@ -144,7 +144,7 @@ sortedcontainers==2.4.0
 SoundFile==0.10.3.post1
 soupsieve==2.3.2.post1
 stack-data @ file:///opt/conda/conda-bld/stack_data_1646927590127/work
-tensorboard==2.0.2
+tensorboard==2.12.2
 tensorboard-data-server==0.7.0
 tensorboard-plugin-wit==1.8.1
 tensorboardX==2.6
