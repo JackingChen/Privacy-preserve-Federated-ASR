@@ -119,7 +119,7 @@ if not os.path.exists(args.rsltOut_dir):
 # df_train = pd.read_csv(f"{args.dataIn_dir}" + args.model_name + ".csv") 
 # df_test = pd.read_csv(f"{args.dataIn_dir}" + args.model_name + ".csv")
 
-with open(f"{args.dataIn_dir}" + args.model_name + '_train' + suffix, "rb") as f:# !!!!!!!!!!!Debug而已 要改回_train.pkl
+with open(f"{args.dataIn_dir}" + args.model_name + '_train' + suffix, "rb") as f:
     df_train = pickle.load(f)
 with open(f"{args.dataIn_dir}" + args.model_name + '' + suffix, "rb") as f:
     df_test = pickle.load(f)

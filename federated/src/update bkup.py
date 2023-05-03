@@ -443,16 +443,13 @@ class ASRLocalUpdate(object):
         # generate sub- testing set for given user-ID
         if client_id == "public":                                                   # get spk_id for public dataset, 24 PAR (50% of all testing set)
             client_spks = ['S197', 'S163', 'S193', 'S169', 'S196', 'S184', 'S168', 'S205', 'S185', 'S171', 'S204', 'S173', 'S190', 'S191', 'S203', 
-                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']   
-            # client_spks = ['S197', 'S163']                                # 12 AD + 12 HC
+                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']                                # 12 AD + 12 HC
 
         elif client_id == 0:                                                        # get spk_id for client 1, 12 PAR (25% of all testing set)
             client_spks = ['S198', 'S182', 'S194', 'S161', 'S195', 'S170', 'S187', 'S192', 'S178', 'S201', 'S181', 'S174']
-            # client_spks = ['S198', 'S182']
                                                                                     # 6 AD + 6 HC
         elif client_id == 1:                                                        # get spk_id for client 2, 12 PAR (25% of all testing set)  
             client_spks = ['S179', 'S188', 'S202', 'S162', 'S172', 'S183', 'S186', 'S207', 'S189', 'S164', 'S176', 'S206']
-            # client_spks = ['S179', 'S188']
                                                                                     # 6 AD + 6 HC
         else:
             print("Test with whole dataset!!")

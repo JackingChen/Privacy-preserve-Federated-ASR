@@ -10,3 +10,6 @@ cmp*
 federated/data2vec-audio-large-960h_new2_recall_FL.txt
 centralized/EmbFeats/*
 centralized/mask_info.ipynb
+federated/logs/*
+federated/src/*.txt
+federated/src/dataset/**/*

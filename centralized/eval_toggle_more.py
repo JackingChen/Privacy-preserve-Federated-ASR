@@ -96,6 +96,7 @@ def get_Embs(subset_dataset):
         logits=model(input_values).logits  
         
         asr_lg = logits['ASR logits']
+        AD_lg = logits['dementia logits']
         # 轉換length的度量從sample到output的timestep
         ratio=max(lengths)/asr_lg.shape[1]  # (batchsize, seqlength, logitsize)
         oupLens=[int(l/ratio) for l in lengths]
@@ -111,6 +112,11 @@ def get_Embs(subset_dataset):
     df = pd.DataFrame()
     for i in range(len(subset_dataset)):
         RealLength=oupLens[i]  #只要有從logits取出來的都要還原
+        pred_ad_tstep = torch.argmax(AD_lg[i][:RealLength,:], dim=-1)# pred of each time-step
+        pred_ad = pred_ad_tstep.sum() / pred_ad_tstep.size()[0]      # average result (batchsize, )
+        AD_prediction = 1 if pred_ad > 0.5 else 0
+        # subset_dataset[i]["pred_AD"] = 1 if pred_ad > 0.5 else 0
+
         df2 = pd.DataFrame({'path': subset_dataset[i]["path"],                                    # to know which sample
                 # 'array': str(subset_dataset[i]["array"]),
                 'text': subset_dataset[i]["text"],
@@ -121,7 +127,7 @@ def get_Embs(subset_dataset):
                 # 'hidden_states': str(logits["hidden_states"][i].tolist()), #原本的hidden state架構
                 'dementia logits': [logits["dementia logits"][i][:RealLength,:].cpu().numpy()],
                 'hidden_states': [logits["hidden_states"][i][:RealLength,:].cpu().numpy()],  #(time-step,node_dimension)
-                'pred_AD': subset_dataset[i]["pred_AD"],                             # AD prediction
+                'pred_AD': AD_prediction,                             # AD prediction
                 'pred_str': pred_str[i],                           # predicted transcript
                 'dementia_mask': [logits["dementia_mask"][i][:RealLength,:].cpu().numpy()],  # ASR-free mask for AD classification
                 'lm_mask': [logits["lm_mask"][i][:RealLength,:].cpu().numpy()],# AD-free mask for ASR task
