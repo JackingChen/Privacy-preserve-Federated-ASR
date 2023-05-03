@@ -13,3 +13,4 @@ centralized/mask_info.ipynb
 federated/logs/*
 federated/src/*.txt
 federated/src/dataset/**/*
+centralized/eval_finetune_old.py

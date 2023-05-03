@@ -418,17 +418,14 @@ class ASRLocalUpdate(object):
             'S097', 'S128', 'S059', 'S096', 'S081', 'S135', 'S094', 'S070', 'S049', 'S080', 'S040', 'S076', 'S093', 'S141', 'S034', 'S056', 'S090', 
             'S130', 'S092', 'S055', 'S019', 'S154', 'S017', 'S114', 'S100', 'S036', 'S029', 'S127', 'S073', 'S089', 'S051', 'S005', 'S151', 'S003', 
             'S033', 'S007', 'S084', 'S043', 'S009']                                 # 27 AD + 27 HC
-            # client_spks = ['S086', 'S021']                                 # 27 AD + 27 HC  
 
         elif client_id == 0:                                                        # get spk_id for client 1, 27 PAR (25% of all training set)
             client_spks = ['S058', 'S030', 'S064', 'S104', 'S048', 'S118', 'S122', 'S001', 'S087', 'S013', 'S025', 'S083', 'S067', 'S068', 'S111', 
             'S028', 'S015', 'S108', 'S095', 'S002', 'S072', 'S020', 'S148', 'S144', 'S110', 'S124', 'S129']
-            # client_spks = ['S058', 'S030']
                                                                                     # 13 AD + 14 HC
         elif client_id == 1:                                                        # get spk_id for client 2, 27 PAR (25% of all training set)  
             client_spks = ['S071', 'S136', 'S140', 'S145', 'S032', 'S101', 'S103', 'S139', 'S038', 'S153', 'S035', 'S011', 'S132', 'S006', 'S149', 
             'S041', 'S079', 'S107', 'S063', 'S061', 'S125', 'S062', 'S012', 'S138', 'S024', 'S052', 'S142']
-            # client_spks = ['S071', 'S136']
                                                                                     # 14 AD + 13 HC
         else:
             print("Train with whole dataset!!")
@@ -443,16 +440,13 @@ class ASRLocalUpdate(object):
         # generate sub- testing set for given user-ID
         if client_id == "public":                                                   # get spk_id for public dataset, 24 PAR (50% of all testing set)
             client_spks = ['S197', 'S163', 'S193', 'S169', 'S196', 'S184', 'S168', 'S205', 'S185', 'S171', 'S204', 'S173', 'S190', 'S191', 'S203', 
-                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']   
-            # client_spks = ['S197', 'S163']                                # 12 AD + 12 HC
+                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']                                # 12 AD + 12 HC
 
         elif client_id == 0:                                                        # get spk_id for client 1, 12 PAR (25% of all testing set)
             client_spks = ['S198', 'S182', 'S194', 'S161', 'S195', 'S170', 'S187', 'S192', 'S178', 'S201', 'S181', 'S174']
-            # client_spks = ['S198', 'S182']
                                                                                     # 6 AD + 6 HC
         elif client_id == 1:                                                        # get spk_id for client 2, 12 PAR (25% of all testing set)  
             client_spks = ['S179', 'S188', 'S202', 'S162', 'S172', 'S183', 'S186', 'S207', 'S189', 'S164', 'S176', 'S206']
-            # client_spks = ['S179', 'S188']
                                                                                     # 6 AD + 6 HC
         else:
             print("Test with whole dataset!!")

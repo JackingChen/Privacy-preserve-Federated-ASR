@@ -21,7 +21,7 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset, 
     train_loss = []                                                                 # list for training loss
     global_weights = None                                                           # initial global_weights
 
-    
+    multiprocessing.set_start_method('spawn', force=True)
     for epoch in tqdm(range(args.epochs)):                                          # train for given global rounds
         print(f'\n | Global Training Round : {epoch+1} |\n')                        # print current round
 
@@ -49,7 +49,7 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset, 
                                                                                     # or model in last round
                                                                                     # final result in model_out_path + "_client" + str(client_id) + "_round" + str(global_round)
         except Exception as e:
-            print(f"An error occurred while using starmap_sync to run client_train: {str(e)}")
+            print(f"An error occurred while running local_model.update_weights(): {str(e)}")
         
         finally:
             final_result.wait()                                                     # wait for all clients end
@@ -159,7 +159,6 @@ if __name__ == '__main__':
     exp_details(args)                                                               # print out details based on configuration
 
     train_dataset, test_dataset = get_dataset(args)                                 # get dataset
-    multiprocessing.set_start_method('spawn', force=True)
     if args.EXTRACT != True:                                                        # Training
         if args.FL_STAGE == 1:
             print("| Start FL Training Stage 1|")
