@@ -6,8 +6,8 @@ import copy
 import torch
 from torchvision import datasets, transforms
 
-from sampling import mnist_iid, mnist_noniid, mnist_noniid_unequal
-from sampling import cifar_iid, cifar_noniid
+# from sampling import mnist_iid, mnist_noniid, mnist_noniid_unequal
+# from sampling import cifar_iid, cifar_noniid
 
 from transformers import Wav2Vec2Processor
 from datasets import Dataset
@@ -16,6 +16,10 @@ import numpy as np
 import pandas as pd
 import os
 from datasets import load_from_disk
+
+
+DACS_codeRoot = os.environ.get('DACS_codeRoot')
+DACS_dataRoot = os.environ.get('DACS_dataRoot')
 
 def prepare_dataset(batch, processor):
     audio = batch["array"]
@@ -29,7 +33,7 @@ def prepare_dataset(batch, processor):
     return batch
 
 def ID2Label(ID,
-            spk2label = np.load("/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/dataset/test_dic.npy", allow_pickle=True).tolist()):
+            spk2label = np.load(f"{DACS_codeRoot}/meta-data/test_dic.npy", allow_pickle=True).tolist()):
     name = ID.split("_")                                                    #  from file name to spkID
     if (name[1] == 'INV'):                                                  # interviewer is CC
         label = 0
@@ -37,8 +41,8 @@ def ID2Label(ID,
         label = spk2label[name[0]]                                          # label according to look-up table
     return label                                                            # return dementia label for this file
 
-def csv2dataset(PATH = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/clips/',
-                path = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv'):
+def csv2dataset(PATH = f'{DACS_dataRoot}/clips/',
+                path = f'{DACS_dataRoot}/mid_csv/test.csv'):
     stored = "./dataset/" + path.split("/")[-1].split(".")[0]
     if (os.path.exists(stored)):
         print("Load data from local...")
@@ -135,9 +139,9 @@ def get_dataset(args):
         processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
 
         # load train / test data
-        train_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/train.csv")
-        #dev_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/dev.csv")
-        test_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv")
+        train_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/train.csv")
+        #dev_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/dev.csv")
+        test_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/test.csv")
 
         # map to desired form
         #train_data = train_data.map(prepare_dataset, num_proc=10)

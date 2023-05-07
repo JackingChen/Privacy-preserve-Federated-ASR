@@ -25,6 +25,9 @@ from tensorboardX import SummaryWriter
 
 LOG_DIR = './' #log/'
 
+DACS_codeRoot = os.environ.get('DACS_codeRoot')
+DACS_dataRoot = os.environ.get('DACS_dataRoot')
+
 from datasets import load_metric
 wer_metric = load_metric("wer")
 def compute_metrics(pred):
@@ -106,8 +109,8 @@ class DatasetSplit(Dataset):
         image, label = self.dataset[self.idxs[item]]
         return torch.tensor(image), torch.tensor(label)
 
-def csv2dataset(PATH = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/clips/',
-                path = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/test.csv'):
+def csv2dataset(PATH = f'{DACS_codeRoot}/clips/',
+                path = f'{DACS_codeRoot}/mid_csv/test.csv'):
     stored = "./dataset/" + path.split("/")[-1].split(".")[0]
     if (os.path.exists(stored)):
         print("Load data from local...")
