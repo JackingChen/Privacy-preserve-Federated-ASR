@@ -43,7 +43,6 @@ def compute_metrics(pred):
     wer = wer_metric.compute(predictions=pred_str, references=label_str)
 
     return {"wer": wer}
-
 class CustomTrainer(Trainer):    
     def compute_loss(self, model, inputs, return_outputs=False):
             """
@@ -85,7 +84,7 @@ class CustomTrainer(Trainer):
         self.state.log_history.append(output)
         
         # write to txt file
-        file_object = open(LOG_DIR + log_path, 'a')
+        file_object = open(LOG_DIR , 'a')
         # Append at the end of file
         file_object.write(json.dumps(output) + '\n')
         # Close the file
@@ -493,7 +492,7 @@ class ASRLocalUpdate(object):
                 model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="toggling_network")             
                                                                                     # from model from model_in_path, update arbitrator's weight
         global log_path
-        log_path = self.args.log_path
+        log_path = self.log_path
 
         model.train()
         if self.args.STAGE == 0:                                                    # fine-tune ASR

@@ -580,6 +580,7 @@ class Data2VecAudioForCTC(Data2VecAudioPreTrainedModel):
                     dementia_loss = loss_fn(dementia_output_mean, dementia_labels, self.AD_loss)                      # AD classifier
                     dementia_loss_unmask = loss_fn(dementia_output_mean_unmask, dementia_labels, self.AD_loss)        # unmask
                     dementia_loss_rev = loss_fn(dementia_output_mean_r, dementia_labels, self.AD_loss)                # reverse     
+
                 # att loss
                 #Att_loss = FSMatt_loss(lm_mask, AD_mask)                                                        # not used in this version
                 # diversity loss: AM-Softmax
