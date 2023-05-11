@@ -6,6 +6,27 @@
     - jiwer
     - Levenshtein==0.21.0
 
+
+
+# 增加算力
+## Server admin
+```
+wget http://140.114.84.56/Create_usr.sh
+chmod +x Create_usr.sh
+bash Create_usr.sh
+```
+
+## user
+```
+git clone https://github.com/JackingChen/FedLearn.git
+cd FedLearn
+conda create -y --name username
+conda activate username
+conda install -y pip
+cd federated
+pip install -r requirements.txt
+
+```
 # Training
 1. Baselines
     - Fine-tune: use `finetune_ASRs.py` to train
