@@ -22,7 +22,7 @@ import copy
 from transformers import Data2VecAudioConfig, Wav2Vec2Processor
 import copy
 from tensorboardX import SummaryWriter
-
+from utils import ID2Label
 LOG_DIR = './' #log/'
 
 DACS_codeRoot = os.environ.get('DACS_codeRoot')
@@ -206,14 +206,14 @@ def map_to_result(batch, processor, model, idx):
     """
     return df
 
-def ID2Label(ID,
-            spk2label = np.load("/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/dataset/test_dic.npy", allow_pickle=True).tolist()):
-    name = ID.split("_")                                  #  from file name to spkID
-    if (name[1] == 'INV'):                                # interviewer is CC
-        label = 0
-    else:                                                 # for participant
-        label = spk2label[name[0]]                        # label according to look-up table
-    return label                                          # return dementia label for this file
+# def ID2Label(ID,
+#             spk2label = np.load("/mnt/Internal/FedASR/weitung/HuggingFace/Pretrain/dataset/test_dic.npy", allow_pickle=True).tolist()):
+#     name = ID.split("_")                                  #  from file name to spkID
+#     if (name[1] == 'INV'):                                # interviewer is CC
+#         label = 0
+#     else:                                                 # for participant
+#         label = spk2label[name[0]]                        # label according to look-up table
+#     return label                                          # return dementia label for this file
 
 def update_network(args, source_path, target_path, network):                        # replace "network" in source_path with that in target_path
     # read source model                                                             # return model

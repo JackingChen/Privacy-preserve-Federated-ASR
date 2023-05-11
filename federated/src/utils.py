@@ -135,13 +135,13 @@ def get_dataset(args):
             else:
                 # Chose euqal splits for every user
                 user_groups = mnist_noniid(train_dataset, args.num_users)
-    elif args.dataset == 'adress':                                                  # for ADReSS dataset
-        processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
+    elif args.dataset == 'adress':# for ADReSS dataset 
+        processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)  
 
         # load train / test data
-        train_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/train.csv")
-        #dev_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/dev.csv")
-        test_data = csv2dataset(path = f"{DACS_codeRoot}/mid_csv/test.csv")
+        train_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/train.csv")
+        #dev_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/dev.csv")
+        test_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/test.csv")
 
         # map to desired form
         #train_data = train_data.map(prepare_dataset, num_proc=10)

@@ -4,6 +4,8 @@
 # 2. 在讀音檔的時候增加一個選項：scipy.io，讀起來會快很多但是不知道會不會影響到原來的效果
 
 # 大約10138MiB
+
+# 訓練一次在CPU很滿的情況下7hr
 # =============================================================
 
 import torch
@@ -41,7 +43,7 @@ from transformers import Data2VecAudioConfig, Wav2Vec2Processor
 import copy
 from tensorboardX import SummaryWriter
 import argparse
-from update import compute_metrics
+# from update import compute_metrics
 from update import update_network_weight
 
 
@@ -140,9 +142,9 @@ parser.add_argument('-lam', '--LAMBDA', type=float, default=0.5, help="Lambda fo
 parser.add_argument('-st', '--STAGE', type=int, default=0, help="Current training stage")
 parser.add_argument('-fl_st', '--FL_STAGE', type=int, default=1, help="Current FL training stage")
 parser.add_argument('-GRL', '--GRL', action='store_true', default=False, help="True: GRL")
-parser.add_argument('-model_in', '--model_in_path', type=str, default="./saves/wav2vec2-base-960h_GRL_0.5/checkpoint-14010/", help="Where the global model is saved")
-parser.add_argument('-model_out', '--model_out_path', type=str, default="./saves/wav2vec2-base-960h_linear_GRL", help="Where to save the model")
-parser.add_argument('-log', '--log_path', type=str, default="wav2vec2-base-960h_linear_GRL.txt", help="name for the txt file")
+parser.add_argument('-model_in', '--model_in_path', type=str, default="/home/FedASR/dacs/federated/save/data2vec-audio-large-960h_new1_recall_FLASR", help="Where the global model is saved")
+parser.add_argument('-model_out', '--model_out_path', type=str, default="/home/FedASR/dacs/federated/save/", help="Where to save the model")
+# parser.add_argument('-log', '--log_path', type=str, default="wav2vec2-base-960h_linear_GRL.txt", help="name for the txt file")
 parser.add_argument('-csv', '--csv_path', type=str, default="wav2vec2-base-960h_GRL_0.5", help="name for the csv file")
 # 2023/01/08: loss type
 parser.add_argument('-ad_loss', '--AD_loss', type=str, default=None, help="loss to use for AD classifier")
@@ -173,7 +175,16 @@ model_type = args.model_type                # what type of the model
 lr = args.learning_rate                     # learning rate
 optim = args.optimizer                      # opt
 max_grad_norm = args.max_grad_norm          # max_grad_norm
+args.log_path=os.path.basename(args.model_in_path)
+args.log_path+="epoch-{}".format(args.local_ep)
 
+def Write_log(content,LOG_DIR="/home/FedASR/dacs/federated/logs/"):
+    # write to txt file
+    file_object = open(LOG_DIR + args.log_path, 'a')
+    # Append at the end of file
+    file_object.write(json.dumps(content) + '\n')
+    # Close the file
+    file_object.close()
 
 def map_to_result(batch, model):
     with torch.no_grad():
@@ -226,13 +237,7 @@ class CustomTrainer(Trainer):
         output = {**logs, **{"step": self.state.global_step}}
         self.state.log_history.append(output)
         
-        LOG_DIR="/home/FedASR/dacs/federated/logs"
-        # write to txt file
-        file_object = open(LOG_DIR + args.log_path, 'a')
-        # Append at the end of file
-        file_object.write(json.dumps(output) + '\n')
-        # Close the file
-        file_object.close()
+        Write_log(LOG_DIR="/home/FedASR/dacs/federated/logs/",content=output)
 
         self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)
 
@@ -448,7 +453,21 @@ class ASRLocalUpdate(object):
 
         print(self.args.csv_path + " All Done")
 
+from datasets import load_metric
+wer_metric = load_metric("wer")
+def compute_metrics(pred):
+    pred_logits = pred.predictions
+    pred_ids = np.argmax(pred_logits, axis=-1)
 
+    pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
+
+    pred_str = processor.batch_decode(pred_ids)
+    # we do not want to group tokens when computing the metrics
+    label_str = processor.batch_decode(pred.label_ids, group_tokens=False)
+
+    wer = wer_metric.compute(predictions=pred_str, references=label_str)
+
+    return {"wer": wer}
 
 
 exp_details(args)                                                               # print out details based on configuration
@@ -464,10 +483,11 @@ train_dataset, test_dataset = get_dataset(args)                                 
 # test_data = csv2dataset(PATH = '{}/clips/'.format(args.root_dir),
 #                         path = "{}/mid_csv/test.csv".format(args.root_dir))
 # 吃global
+
 client_id=0
-model_in_path="facebook/data2vec-audio-large-960h"
-global_mdl_path="/home/FedASR/dacs/federated/save/data2vec-audio-large-960h_new1_recall_FLASR"
-model_out_path="/home/FedASR/dacs/federated/save/"
+model_in_path=args.pretrain_name
+global_mdl_path=args.model_in_path
+model_out_path=args.model_out_path
 global_weights = get_model_weight(args=args, source_path=global_mdl_path + "_global/final/", network="ASR")
                                                                     # local ASR and AD with global toggling network
                                                                     # get toggling_network weights from model in model_out_path + "_global/final/"
@@ -477,7 +497,12 @@ local_model = ASRLocalUpdate(args=args, dataset=train_dataset, global_test_datas
                                                                                       # initial dataset of current client
 # 訓練模型
 trained_model = local_model.update_weights(global_weights=global_weights, global_round=0) 
+
+
+args.model_out_path=args.model_out_path+"_epoch-{}".format(args.local_ep)
+trained_model.save_pretrained(args.model_out_path+"/final")
 # evaluate
-result = test_dataset.map(map_to_result)
+result = test_dataset.map(map_to_result,trained_model)
+Write_log({"test_wer= ":wer(result["text"], result["pred_str"])},LOG_DIR="/home/FedASR/dacs/federated/logs/")
 print("WER of ", args.pretrain_name, " : ", wer(result["text"], result["pred_str"]))
 
