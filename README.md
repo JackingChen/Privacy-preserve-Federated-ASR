@@ -27,6 +27,22 @@ cd federated
 pip install -r requirements.txt
 
 ```
+
+##TWCC 安裝
+```
+pip install TWCC-CLI
+twccli config init
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export PYTHONIOENCODING=UTF-8
+```
+TWCC 設定[SSH Without Password](https://man.twcc.ai/@twccdocs/doc-cli-main-zh/https%3A%2F%2Fman.twcc.ai%2F%40twccdocs%2Fhowto-cli-ccs-deploy-auto-aiml-pipeline-zh)
+##TWCC 開啟然後連到instance
+```
+bash TWCC_auto.sh
+```
+
+
 # Training
 1. Baselines
     - Fine-tune: use `finetune_ASRs.py` to train
