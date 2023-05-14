@@ -44,7 +44,7 @@ import copy
 from tensorboardX import SummaryWriter
 import argparse
 # from update import compute_metrics
-from update import update_network_weight
+
 
 
 # set up trainer
@@ -164,12 +164,8 @@ parser.add_argument('--global_ep', type=int, default=30, help="number for global
 
 args = parser.parse_args()
 
-
-# os.environ['DACS_codeRoot'] = '/home/FedASR/dacs/'
-# os.environ['DACS_dataRoot'] = '/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/'
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3"
 from utils import csv2dataset, get_dataset, average_weights, exp_details
-
+from update import update_network_weight
 #model_out_dir = args.model_path # where to save model
 model_type = args.model_type                # what type of the model
 lr = args.learning_rate                     # learning rate
@@ -186,16 +182,17 @@ def Write_log(content,LOG_DIR="/home/FedASR/dacs/federated/logs/"):
     # Close the file
     file_object.close()
 
-def map_to_result(batch, model):
+def map_to_result(batch, model,processor):
     with torch.no_grad():
         input_values = torch.tensor(batch["input_values"]).unsqueeze(0)
         logits = model(input_values).logits
 
     pred_ids = torch.argmax(logits, dim=-1)
-    batch["pred_str"] = model.batch_decode(pred_ids)[0]
-    batch["text"] = model.decode(batch["labels"], group_tokens=False)
+    batch["pred_str"] = processor.batch_decode(pred_ids)[0]
+    batch["text"] = processor.decode(batch["labels"], group_tokens=False)
   
     return batch
+
 
 class CustomTrainer(Trainer):    
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -236,14 +233,14 @@ class CustomTrainer(Trainer):
 
         output = {**logs, **{"step": self.state.global_step}}
         self.state.log_history.append(output)
-        
+
         DACS_codeRoot = os.getenv("DACS_codeRoot")
-        
+
         output_path=f"{DACS_codeRoot}/federated/logs/"
         if not os.path.exists(output_path):
             os.makedirs(output_path)
-        
-        Write_log(LOG_DIR=output_path,content=output)
+
+        Write_log(LOG_DIR=f"{DACS_codeRoot}/federated/logs/",content=output)
 
         self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)
 
@@ -508,7 +505,9 @@ trained_model = local_model.update_weights(global_weights=global_weights, global
 args.model_out_path=args.model_out_path+"_epoch-{}".format(args.local_ep)
 trained_model.save_pretrained(args.model_out_path+"/final")
 # evaluate
-result = test_dataset.map(map_to_result,trained_model)
+map_to_result_with_model = lambda batch: map_to_result(batch, trained_model, local_model.processor)
+result = test_dataset.map(map_to_result_with_model)
 Write_log({"test_wer= ":wer(result["text"], result["pred_str"])},LOG_DIR="/home/FedASR/dacs/federated/logs/")
 print("WER of ", args.pretrain_name, " : ", wer(result["text"], result["pred_str"]))
+
 
