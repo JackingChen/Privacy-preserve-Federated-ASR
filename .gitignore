@@ -15,3 +15,5 @@ federated/src/*.txt
 federated/src/dataset/**/*
 federated/*.txt
 federated/src/saves/**/*
+ADReSS-IS2020-data/**/*
+PretrainedMdls/**/*
