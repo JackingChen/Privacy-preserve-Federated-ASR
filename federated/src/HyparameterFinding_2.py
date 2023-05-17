@@ -42,6 +42,9 @@ import copy
 from transformers import Data2VecAudioConfig, Wav2Vec2Processor
 import copy
 from tensorboardX import SummaryWriter
+# Reset since we are using a different mode.
+import torch._dynamo
+
 import argparse
 # from update import compute_metrics
 
@@ -391,12 +394,16 @@ class ASRLocalUpdate(object):
             save_total_limit=2,
             log_level='debug',
             logging_strategy="steps",
+            torch_compile=True,
+            #torch_compile_mode='default',
+            # torch_compile_backend="aot_nvfuser"
             #adafactor=True,            # default:false. Whether or not to use transformers.Adafactor optimizer instead of transformers.AdamW
             #fp16_full_eval=True,      # to save memory
             #max_grad_norm=0.5
         )
         global processor
         processor = self.processor
+        # model=torch.compile(model)
         # self.debug_mdl=model
         trainer = CustomTrainer(
             model=model,
@@ -409,6 +416,7 @@ class ASRLocalUpdate(object):
         )
 
         print(" | Client ", str(self.client_id), " ready to train! |")
+        # trainer=torch.compile(trainer)
         trainer.train()
         return trainer.model
 
