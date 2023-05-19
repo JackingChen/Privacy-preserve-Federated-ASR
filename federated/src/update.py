@@ -19,7 +19,7 @@ from datasets import Dataset, load_from_disk
 import librosa
 from jiwer import wer
 import copy
-from transformers import Data2VecAudioConfig, Wav2Vec2Processor
+from transformers import Data2VecAudioConfig, Wav2Vec2Processor, TrainerCallback
 import copy
 from tensorboardX import SummaryWriter
 
@@ -364,6 +364,20 @@ class LocalUpdate(object):
         accuracy = correct/total
         return accuracy, loss                                                   # return acc. & total loss
 
+def compute_wer(preds, labels):
+    wer = jiwer.wer(labels, preds)
+    return wer
+
+class WERCallback(TrainerCallback):
+    def __init__(self, eval_dataset):
+        self.eval_dataset = eval_dataset
+
+    def on_epoch_end(self, args: TrainingArguments, state, control, **kwargs):
+        trainer = control["trainer"]
+        preds = trainer.predict(self.eval_dataset).predictions
+        labels = self.eval_dataset["transcription"]
+        wer = compute_wer(preds, labels)
+        print(f"Training set WER for epoch {state.epoch} : {wer:.4f}")
 
 def test_inference(args, model, test_dataset):                                  # given global model and global testing set
     """ Returns the test accuracy and loss.
@@ -418,7 +432,11 @@ class ASRLocalUpdate(object):
             'S097', 'S128', 'S059', 'S096', 'S081', 'S135', 'S094', 'S070', 'S049', 'S080', 'S040', 'S076', 'S093', 'S141', 'S034', 'S056', 'S090', 
             'S130', 'S092', 'S055', 'S019', 'S154', 'S017', 'S114', 'S100', 'S036', 'S029', 'S127', 'S073', 'S089', 'S051', 'S005', 'S151', 'S003', 
             'S033', 'S007', 'S084', 'S043', 'S009']                                 # 27 AD + 27 HC
-
+        elif client_id == "public2":                                                # get spk_id for public dataset, 54 PAR (50% of all training set) from clients
+            client_spks = ['S058', 'S030', 'S064', 'S104', 'S048', 'S118', 'S122', 'S001', 'S087', 'S013', 'S025', 'S083', 'S067', 'S068', 'S111', 
+            'S028', 'S015', 'S108', 'S095', 'S002', 'S072', 'S020', 'S148', 'S144', 'S110', 'S124', 'S129', 'S071', 'S136', 'S140', 'S145', 'S032', 
+            'S101', 'S103', 'S139', 'S038', 'S153', 'S035', 'S011', 'S132', 'S006', 'S149', 'S041', 'S079', 'S107', 'S063', 'S061', 'S125', 'S062', 
+            'S012', 'S138', 'S024', 'S052', 'S142']                                 # 27 AD + 27 HC
         elif client_id == 0:                                                        # get spk_id for client 1, 27 PAR (25% of all training set)
             client_spks = ['S058', 'S030', 'S064', 'S104', 'S048', 'S118', 'S122', 'S001', 'S087', 'S013', 'S025', 'S083', 'S067', 'S068', 'S111', 
             'S028', 'S015', 'S108', 'S095', 'S002', 'S072', 'S020', 'S148', 'S144', 'S110', 'S124', 'S129']
@@ -458,7 +476,7 @@ class ASRLocalUpdate(object):
         return client_test_dataset
     
     def record_result(self, trainer, result_folder):                                # save training loss, testing loss, and testing wer
-        logger = SummaryWriter('../logs/' + result_folder.split("/")[-1])           # use name of this model as folder's name
+        logger = SummaryWriter('./logs/' + result_folder.split("/")[-1])           # use name of this model as folder's name
 
         for idx in range(len(trainer.state.log_history)):
             if "loss" in trainer.state.log_history[idx].keys():                     # add in training loss, epoch*100 to obtain int
@@ -515,7 +533,7 @@ class ASRLocalUpdate(object):
             fp16=True,
             gradient_checkpointing=True, 
             save_steps=500, # 500
-            eval_steps=500, # 500
+            eval_steps=100, # 500
             logging_steps=10, # 500
             learning_rate=lr, # self.args.lr
             weight_decay=0.005,
@@ -538,6 +556,7 @@ class ASRLocalUpdate(object):
             train_dataset=self.client_train_dataset,
             eval_dataset=self.global_test_dataset,
             tokenizer=self.processor.feature_extractor,
+            #callbacks=[WERCallback(self.client_train_dataset)], # eval at the end
         )
 
         print(" | Client ", str(self.client_id), " ready to train! |")
