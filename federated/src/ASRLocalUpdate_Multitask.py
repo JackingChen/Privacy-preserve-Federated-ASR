@@ -499,7 +499,7 @@ class ASRLocalUpdate_multi(object):
         # unsupervised training for clients only
         save_path = self.model_out_path + "_client" + str(self.client_id) + "_round" + str(global_round) + "_unsuper"
                                                                                     # for local models, record info for id & num_round
-        # TODO: 訓練在沒有label的資料上    (self-supervise)
+        # 訓練在沒有label的資料上    (self-supervise)
         # use starting model to generate transcripts
         _, self.client_train_dataset_unsupervised = gen_Ntranscripts(dataset=self.client_train_dataset_unsupervised, model=model, processor=self.processor, 
                                                                      device=self.device, num_lms=self.args.num_lms, TRAIN=0, GPU_batchsize=16)

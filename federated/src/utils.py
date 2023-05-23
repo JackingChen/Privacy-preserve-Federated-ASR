@@ -16,14 +16,13 @@ import numpy as np
 import pandas as pd
 import os
 from datasets import load_from_disk
-
+import scipy
+import argparse
 
 DACS_codeRoot = os.environ.get('DACS_codeRoot')
 DACS_dataRoot = os.environ.get('DACS_dataRoot')
 
-def prepare_dataset(batch, processor):
-import scipy
-import argparse
+
 
 # 一些參數
 parser = argparse.ArgumentParser()
@@ -121,21 +120,25 @@ def csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
 
     i = 1
     for file_path in dataset['path']:                                            # for all files
-        if (dataset['sentence'][i-1] != None) or (with_transcript == False):     # only the non-empty transcript for dataset w/ with_transcript
-                                                                                 # or dataset w.o. transcript
-            if args.AudioLoadFunc == 'librosa':
+        if 'sentence' in dataset.features:                                       # 只有有sentence且sentence那隔沒資訊的時候才跳過
+            if dataset['sentence'][i-1] == None:
+                continue
+        if args.AudioLoadFunc == 'librosa':
+            try:
                 sig, s = librosa.load('{0}/{1}'.format(audio_path,file_path), sr=args.sampl_rate, dtype='float32')  
-                                                                                 # read audio w/ 16k sr
-            else:
-                s, sig = scipy.io.wavfile.read('{0}/{1}'.format(audio_path,file_path))
-                sig=librosa.util.normalize(sig)
-            if len(sig) > 1600:                                                  # get rid of audio that's too short
-                my_dict["path"].append(file_path)                                # add path
-                my_dict["array"].append(sig)                                     # add audio wave
-                if with_transcript:
-                    my_dict["text"].append(dataset['sentence'][i-1].upper())     # transcript to uppercase
-                my_dict["dementia_labels"].append(ID2Label(ID=file_path,
-                                                           spk2label=spk2label))
+                                                                                    # read audio w/ 16k sr
+            except   ValueError:                                                 # 跳過讀不進來的音檔                                                 
+                print("Err file = ", audio_path,file_path)
+        else:
+            s, sig = scipy.io.wavfile.read('{0}/{1}'.format(audio_path,file_path))
+            sig=librosa.util.normalize(sig)
+        if len(sig) > 1600:                                                  # get rid of audio that's too short
+            my_dict["path"].append(file_path)                                # add path
+            my_dict["array"].append(sig)                                     # add audio wave
+            if with_transcript:
+                my_dict["text"].append(dataset['sentence'][i-1].upper())     # transcript to uppercase
+            my_dict["dementia_labels"].append(ID2Label(ID=file_path,
+                                                        spk2label=spk2label))
         print(i, end="\r")                                                       # print progress
         i += 1
     print("There're ", len(my_dict["path"]), " non-empty files.")
@@ -205,13 +208,6 @@ def get_dataset(args):
             else:
                 # Chose euqal splits for every user
                 user_groups = mnist_noniid(train_dataset, args.num_users)
-    elif args.dataset == 'adress':# for ADReSS dataset 
-        processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)  
-
-        # load train / test data
-        train_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/train.csv")
-        #dev_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/dev.csv")
-        test_data = csv2dataset(path = f"{DACS_dataRoot}/mid_csv/test.csv")
     elif args.dataset == 'adress':                                               # for ADReSS dataset
         processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
 
@@ -263,5 +259,7 @@ def exp_details(args):
     print('    Federated parameters:')
     print(f'    Number of users    : {args.num_users}')
     print(f'    Fraction of users  : {args.frac}')
+    print(f'    supervise level is set to  : {args.supervised_level}')
+    print(f'    eval step is set to  : {args.eval_steps}')
 
     return

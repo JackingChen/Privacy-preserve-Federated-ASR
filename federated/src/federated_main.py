@@ -99,13 +99,14 @@ def stage1_training(args, train_dataset_supervised, train_dataset_unsupervised, 
     ##########################################################
     
     args.local_ep = args.global_ep                                                  # use number of global epoch for global model
+    # Note !!!!!!!!!!!!!!!!!!!!!!!!!!!!!  要改回來
     args.STAGE = 0                                                                  # train ASR first
     centralized_training(args=args, model_in_path=args.pretrain_name, model_out_path=args.model_out_path+"_finetune", 
                          train_dataset=train_dataset_supervised, test_dataset=test_dataset, epoch=0)
                                                                                     # train from pretrain, final result in args.model_out_path + "_finetune" + "_global/final"
-    args.STAGE = 1                                                                  # then train AD classifier
-    centralized_training(args=args, model_in_path=args.model_out_path+"_finetune_global/final/", 
-                         model_out_path=args.model_out_path, train_dataset=train_dataset_supervised, test_dataset=test_dataset, epoch=0)
+    # args.STAGE = 1                                                                  # then train AD classifier
+    # centralized_training(args=args, model_in_path=args.model_out_path+"_finetune_global/final/", 
+    #                      model_out_path=args.model_out_path, train_dataset=train_dataset_supervised, test_dataset=test_dataset, epoch=0)
                                                                                     # train from final result from last line, final result in args.model_out_path + "_global/final"
     
     ##########################################################
@@ -121,16 +122,16 @@ def stage1_training(args, train_dataset_supervised, train_dataset_unsupervised, 
     model = update_network_weight(args=args, source_path=args.model_out_path+"_global/final/", target_weight=global_weights, network="ASR") 
     model.save_pretrained(args.model_out_path+"_FLASR_global/final")
     
-    args.STAGE = 1                                                                  # then train AD classifier
-    supervised_level = 1                                                            # train supervised
-    global_weights = FL_training_rounds(args=args, model_in_path_root=args.model_out_path+"_finetune", model_out_path=args.model_out_path,
-                                        train_dataset_supervised=train_dataset_supervised, train_dataset_unsupervised=train_dataset_unsupervised,
-                                        test_dataset=test_dataset, supervised_level=supervised_level)
+    # args.STAGE = 1                                                                  # then train AD classifier
+    # supervised_level = 1                                                            # train supervised
+    # global_weights = FL_training_rounds(args=args, model_in_path_root=args.model_out_path+"_finetune", model_out_path=args.model_out_path,
+    #                                     train_dataset_supervised=train_dataset_supervised, train_dataset_unsupervised=train_dataset_unsupervised,
+    #                                     test_dataset=test_dataset, supervised_level=supervised_level)
 
-    # update global model
-    model = update_network_weight(args=args, source_path=args.model_out_path+"_FLASR_global/final", target_weight=global_weights, network="AD")
-                                                                                    # update AD classifier in source_path with given weights
-    model.save_pretrained(args.model_out_path+"_FLAD_global/final")
+    # # update global model
+    # model = update_network_weight(args=args, source_path=args.model_out_path+"_FLASR_global/final", target_weight=global_weights, network="AD")
+    #                                                                                 # update AD classifier in source_path with given weights
+    # model.save_pretrained(args.model_out_path+"_FLAD_global/final")
     
     
 # FL stage 2: Toggling Network

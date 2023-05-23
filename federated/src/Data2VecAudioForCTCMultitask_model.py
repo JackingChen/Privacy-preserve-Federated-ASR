@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models import Data2VecAudioForCTC, gumbel_softmax, ReverseLayerF, RecallLoss
+from transformers.modeling_outputs import CausalLMOutput
 
 class Data2VecAudioForCTCMultitask(Data2VecAudioForCTC):
     def __init__(self, config, args, num_lms=2):

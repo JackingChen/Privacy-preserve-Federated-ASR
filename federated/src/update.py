@@ -23,14 +23,14 @@ from transformers import Data2VecAudioConfig, Wav2Vec2Processor, TrainerCallback
 import copy
 from tensorboardX import SummaryWriter
 from utils import ID2Label
-LOG_DIR = './' #log/'
+LOG_DIR = './logs/' #log/'
 
 DACS_codeRoot = os.environ.get('DACS_codeRoot')
 DACS_dataRoot = os.environ.get('DACS_dataRoot')
 
 from datasets import load_metric
 wer_metric = load_metric("wer")
-def compute_metrics(pred):
+def compute_metrics(pred,processor):
     pred_logits = pred.predictions
     pred_ids = np.argmax(pred_logits, axis=-1)
 
@@ -84,7 +84,7 @@ class CustomTrainer(Trainer):
         self.state.log_history.append(output)
         
         # write to txt file
-        file_object = open(LOG_DIR , 'a')
+        file_object = open(LOG_DIR + self.args.log_path, 'a')
         # Append at the end of file
         file_object.write(json.dumps(output) + '\n')
         # Close the file
@@ -277,95 +277,6 @@ def get_model_weight(args, source_path, network):                               
     
     return return_weights
 
-class LocalUpdate(object):
-    def __init__(self, args, dataset, idxs, logger):
-        self.args = args                                                        # given configuration
-        self.logger = logger
-        self.trainloader, self.validloader, self.testloader = self.train_val_test(
-            dataset, list(idxs))                                                # get subset of training set (dataset of THIS client), divide into train-dev-test
-                                                                                # idxs: ID of samples
-        self.device = 'cuda' if args.gpu else 'cpu'                             # use gpu or cpu
-        # Default criterion set to NLL loss function
-        self.criterion = nn.NLLLoss().to(self.device)                           # loss function
-
-    def train_val_test(self, dataset, idxs):
-        """
-        Returns train, validation and test dataloaders for a given dataset
-        and user indexes.
-        """
-        # split indexes for train, validation, and test (80, 10, 10)
-        idxs_train = idxs[:int(0.8*len(idxs))]                                  # 80% as training
-        idxs_val = idxs[int(0.8*len(idxs)):int(0.9*len(idxs))]                  # 10% as validation
-        idxs_test = idxs[int(0.9*len(idxs)):]                                   # 10% as testing
-
-        # to data loader
-        trainloader = DataLoader(DatasetSplit(dataset, idxs_train),
-                                 batch_size=self.args.local_bs, shuffle=True)
-        validloader = DataLoader(DatasetSplit(dataset, idxs_val),
-                                 batch_size=int(len(idxs_val)/10), shuffle=False) # 沒用到
-        testloader = DataLoader(DatasetSplit(dataset, idxs_test),
-                                batch_size=int(len(idxs_test)/10), shuffle=False)
-        return trainloader, validloader, testloader
-
-    def update_weights(self, model, global_round):                              # given global model
-        # Set mode to train model
-        model.train()
-        epoch_loss = []
-
-        # Set optimizer for the local updates
-        if self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.lr,
-                                        momentum=0.5)
-        elif self.args.optimizer == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.args.lr,
-                                         weight_decay=1e-4)
-
-        for iter in range(self.args.local_ep):                                  # train for local epochs
-            batch_loss = []
-            for batch_idx, (images, labels) in enumerate(self.trainloader):
-                images, labels = images.to(self.device), labels.to(self.device)
-
-                model.zero_grad()                                               # reset gradient
-                log_probs = model(images)                                       # training data feed to model
-                loss = self.criterion(log_probs, labels)                        # compute loss
-                loss.backward()
-                optimizer.step()
-
-                if self.args.verbose and (batch_idx % 10 == 0):                 # print every 10 steps
-                    print('| Global Round : {} | Local Epoch : {} | [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                        global_round, iter, batch_idx * len(images),
-                        len(self.trainloader.dataset),
-                        100. * batch_idx / len(self.trainloader), loss.item()))
-                self.logger.add_scalar('loss', loss.item())
-                batch_loss.append(loss.item())                                  # save loss for each step
-            epoch_loss.append(sum(batch_loss)/len(batch_loss))                  # average losses to loss for this epoch
-
-        return model.state_dict(), sum(epoch_loss) / len(epoch_loss)            # return weight, average losses to loss for this round
-
-    def inference(self, model):                                                 # given global model
-        """ Returns the inference accuracy and loss.
-        """
-
-        model.eval()
-        loss, total, correct = 0.0, 0.0, 0.0
-
-        for batch_idx, (images, labels) in enumerate(self.testloader):
-            images, labels = images.to(self.device), labels.to(self.device)
-
-            # Inference
-            outputs = model(images)                                             # testing data feed to model
-            batch_loss = self.criterion(outputs, labels)                        # compute loss
-            loss += batch_loss.item()                                           # sum up losses
-
-            # Prediction
-            _, pred_labels = torch.max(outputs, 1)                              # make prediction
-            pred_labels = pred_labels.view(-1)
-            correct += torch.sum(torch.eq(pred_labels, labels)).item()          # sum up num of correct predictions
-            total += len(labels)                                                # sum up num of evaluated samples
-
-        accuracy = correct/total
-        return accuracy, loss                                                   # return acc. & total loss
-
 def compute_wer(preds, labels):
     wer = jiwer.wer(labels, preds)
     return wer
@@ -410,6 +321,8 @@ def test_inference(args, model, test_dataset):                                  
     accuracy = correct/total
     return accuracy, loss                                                       # return acc. & total loss
 
+
+    
 class ASRLocalUpdate(object):
     def __init__(self, args, dataset, global_test_dataset, client_id, 
                  model_in_path, model_out_path):
@@ -509,9 +422,6 @@ class ASRLocalUpdate(object):
             elif self.args.STAGE == 2:                                              # train toggling network
                 model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="toggling_network")             
                                                                                     # from model from model_in_path, update arbitrator's weight
-        global log_path
-        log_path = self.log_path
-
         model.train()
         if self.args.STAGE == 0:                                                    # fine-tune ASR
             lr = 1e-5
@@ -528,14 +438,14 @@ class ASRLocalUpdate(object):
         training_args = TrainingArguments(
             output_dir=save_path,
             group_by_length=True,
-            per_device_train_batch_size=1,
-            per_device_eval_batch_size=1,
+            per_device_train_batch_size=self.args.train_batch_size,
+            per_device_eval_batch_size=self.args.eval_batch_size,
             evaluation_strategy="steps",
             num_train_epochs=self.args.local_ep, #self.args.local_ep
             fp16=True,
             gradient_checkpointing=True, 
             save_steps=500, # 500
-            eval_steps=100, # 500
+            eval_steps=self.args.eval_steps, # 500
             logging_steps=10, # 500
             learning_rate=lr, # self.args.lr
             weight_decay=0.005,
@@ -547,14 +457,14 @@ class ASRLocalUpdate(object):
             #fp16_full_eval=True,      # to save memory
             #max_grad_norm=0.5
         )
-        global processor
-        processor = self.processor
+        training_args.log_path='logs'
+        compute_metrics_with_processor = lambda pred: compute_metrics(pred, self.processor)
 
         trainer = CustomTrainer(
             model=model,
             data_collator=self.data_collator,
             args=training_args,
-            compute_metrics=compute_metrics,
+            compute_metrics=compute_metrics_with_processor,
             train_dataset=self.client_train_dataset,
             eval_dataset=self.global_test_dataset,
             tokenizer=self.processor.feature_extractor,
@@ -609,6 +519,3 @@ class ASRLocalUpdate(object):
 
     
 
-
-
-    
