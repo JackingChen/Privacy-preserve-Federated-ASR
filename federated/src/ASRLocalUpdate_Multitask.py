@@ -183,7 +183,7 @@ def get_Embs(subset_dataset, model, processor, device, num_lms, TRAIN):
 
             with processor.as_target_processor():
                 labels = processor(pred_str).input_ids                                              # get label from predicted transcript
-                transcripts.append((pred_str, labels, confidence_scores))
+                transcripts.append((pred_str, labels, confidence_scores))                           # Transcripts[num_transcripts,pred_str/labels/confidence_scores,batch]
         
     df = pd.DataFrame()
     dummy=None
@@ -344,6 +344,14 @@ class CustomTrainer(Trainer):
 
         self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)
 
+def debug_decorator(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        result=result[:50]
+        print(f"Length of Result: {len(result)}")
+        return result
+    return wrapper
+
 class ASRLocalUpdate_multi(object):
     def __init__(self, args, dataset_supervised, dataset_unsupervised, global_test_dataset, client_id, 
                  model_in_path, model_out_path):
@@ -368,7 +376,7 @@ class ASRLocalUpdate_multi(object):
         self.model_in_path = model_in_path                                          # no info for client_id & global_round
         self.model_out_path = model_out_path   
     
-    def train_split_supervised(self, dataset, client_id):
+    def train_split_supervised(self, dataset, client_id, DEBUG=False):
         # generate sub- training set for given user-ID
         if client_id == "public":                                                   # get spk_id for public dataset, 54 PAR (50% of all training set)
             client_spks = ['S086', 'S021', 'S018', 'S156', 'S016', 'S077', 'S027', 'S116', 'S143', 'S082', 'S039', 'S150', 'S004', 'S126', 'S137', 
@@ -392,11 +400,13 @@ class ASRLocalUpdate_multi(object):
             print("Train with whole dataset!!")
             return dataset
         
+        if DEBUG == True:  # set to debug mode
+            client_spks = client_spks[:2]
+
         print("Generating client training set for client ", str(client_id), "...")
         client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
         
         return client_train_dataset
-    
     def train_split_unsupervised(self, dataset, client_id):
         # generate sub- training set for given user-ID
         if client_id == 0:                                                        # get spk_id for client 1, 80 PAR (50% of ADReSSo)
@@ -499,10 +509,13 @@ class ASRLocalUpdate_multi(object):
         # unsupervised training for clients only
         save_path = self.model_out_path + "_client" + str(self.client_id) + "_round" + str(global_round) + "_unsuper"
                                                                                     # for local models, record info for id & num_round
+
         # 訓練在沒有label的資料上    (self-supervise)
         # use starting model to generate transcripts
         _, self.client_train_dataset_unsupervised = gen_Ntranscripts(dataset=self.client_train_dataset_unsupervised, model=model, processor=self.processor, 
                                                                      device=self.device, num_lms=self.args.num_lms, TRAIN=0, GPU_batchsize=16)
+
+
 
         training_args = TrainingArguments(
             output_dir=save_path,
@@ -606,3 +619,4 @@ class ASRLocalUpdate_multi(object):
             return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="toggling_network")  
          
         return return_weights, trainer.state.log_history[-1]["train_loss"]          # return weight, average losses for this round
+

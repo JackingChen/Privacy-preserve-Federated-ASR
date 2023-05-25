@@ -3,7 +3,7 @@ from update import test_inference, ASRLocalUpdate, get_model_weight
 from utils import get_dataset, average_weights, exp_details
 from ASRLocalUpdate_Multitask import ASRLocalUpdate_multi
 
-def client_train(args, model_in_path_root, model_out_path, train_dataset, 
+def client_train(args, model_in_path_root, model_out_path, train_dataset_supervised, train_dataset_unsupervised, 
                  test_dataset, idx, epoch, global_weights=None):                      # train function for each client, train from model in model_in_path 
                                                                                       #                                                                    + "_global/final/"
                                                                                       #                                                                    + "_client" + str(idx) + "_round" + str(args.epochs-1) + "/final/"
@@ -21,8 +21,8 @@ def client_train(args, model_in_path_root, model_out_path, train_dataset,
     else:                                                                             # start from previous local model
         model_in_path = model_out_path + "_client" + str(idx) + "_round" + str(epoch-1) + "/final/"
     
-    local_model = ASRLocalUpdate(args=args, dataset=train_dataset, global_test_dataset=test_dataset, 
-                                 client_id=idx, model_in_path=model_in_path, model_out_path=model_out_path)
+    local_model = ASRLocalUpdate(args=args, dataset_supervised=train_dataset_supervised, dataset_unsupervised=train_dataset_unsupervised,
+                                 global_test_dataset=test_dataset, client_id=idx, model_in_path=model_in_path, model_out_path=model_out_path)
                                                                                       # initial dataset of current client
 
     w, loss = local_model.update_weights(global_weights=global_weights, global_round=epoch) 
@@ -63,6 +63,8 @@ def unsupervised_client_train(args, model_in_path_root, model_out_path, train_da
         else:
             model_in_path = model_out_path + "_client" + str(idx) + "_round" + str(epoch-1) + "/final/"
             init_head = 1                                                             # train from model w/ single lm_head, init_head needed  
+
+    
 
     local_model = ASRLocalUpdate_multi(args=args, dataset_supervised=train_dataset_supervised, dataset_unsupervised=train_dataset_unsupervised,
                                        global_test_dataset=test_dataset, client_id=idx, model_in_path=model_in_path, model_out_path=model_out_path)

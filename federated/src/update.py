@@ -15,6 +15,7 @@ import os
 import pandas as pd
 from transformers import Data2VecAudioConfig
 from models import Data2VecAudioForCTC, Data2VecAudioForCTC_eval, DataCollatorCTCWithPadding
+# from models import Data2VecAudioForCTC_eval, DataCollatorCTCWithPadding
 from datasets import Dataset, load_from_disk
 import librosa
 from jiwer import wer
@@ -23,6 +24,10 @@ from transformers import Data2VecAudioConfig, Wav2Vec2Processor, TrainerCallback
 import copy
 from tensorboardX import SummaryWriter
 from utils import ID2Label
+
+
+
+
 LOG_DIR = './logs/' #log/'
 
 DACS_codeRoot = os.environ.get('DACS_codeRoot')
@@ -321,26 +326,40 @@ def test_inference(args, model, test_dataset):                                  
     accuracy = correct/total
     return accuracy, loss                                                       # return acc. & total loss
 
-
+def debug_decorator(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        result=result[:200]
+        print(f"Length of Result: {len(result)}")
+        return result
+    return wrapper
     
 class ASRLocalUpdate(object):
-    def __init__(self, args, dataset, global_test_dataset, client_id, 
+    def __init__(self, args, dataset_supervised, dataset_unsupervised, global_test_dataset, client_id, 
                  model_in_path, model_out_path):
         self.args = args                                                            # given configuration
-        self.client_train_dataset = self.train_split(dataset, client_id)            # get subset of training set (dataset of THIS client)
-        
+        if dataset_supervised is not None:
+            self.client_train_dataset_supervised = self.train_split_supervised(dataset_supervised, client_id)            
+                                                                                    # get subset of training set (dataset of THIS client)
+        if dataset_unsupervised is not None:                                                                            # for supervised training (w/ transcripts)
+            self.client_train_dataset_unsupervised = self.train_split_unsupervised(dataset_unsupervised, client_id)            
+                                                                                    # get subset of training set (dataset of THIS client)
+                                                                                    # for unsupervised training (w.o. transcripts)
         self.device = 'cuda' if args.gpu else 'cpu'                                 # use gpu or cpu
         
-        self.global_test_dataset = global_test_dataset
-        self.client_test_dataset = self.test_split(global_test_dataset, client_id)  # get subset of testing set (dataset of THIS client)
+        self.global_test_dataset = global_test_dataset                              # global testing set for evaluation
+        #self.client_test_dataset = self.test_split(global_test_dataset, client_id)  # get subset of testing set (dataset of THIS client)
         self.processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
-        self.data_collator = DataCollatorCTCWithPadding(processor=self.processor, padding=True)
+        self.data_collator_unsupervised = DataCollatorCTCWithPadding(processor=self.processor, padding=True)
+                                                                                    # data collator for audio w.o. transcript
+        self.data_collator_supervised = DataCollatorCTCWithPadding(processor=self.processor, padding=True)
+                                                                                    # data collator for audio w/ transcript
         self.client_id = client_id
 
         self.model_in_path = model_in_path                                          # no info for client_id & global_round
-        self.model_out_path = model_out_path                                        # no info for client_id & global_round
+        self.model_out_path = model_out_path   
 
-    def train_split(self, dataset, client_id):
+    def train_split_supervised(self, dataset, client_id):
         # generate sub- training set for given user-ID
         if client_id == "public":                                                   # get spk_id for public dataset, 54 PAR (50% of all training set)
             client_spks = ['S086', 'S021', 'S018', 'S156', 'S016', 'S077', 'S027', 'S116', 'S143', 'S082', 'S039', 'S150', 'S004', 'S126', 'S137', 
@@ -363,14 +382,46 @@ class ASRLocalUpdate(object):
         else:
             print("Train with whole dataset!!")
             return dataset
+
+        print("Generating client training set for client ", str(client_id), "...")
+        client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
+        
+        return client_train_dataset
+    def train_split_unsupervised(self, dataset, client_id):
+        # generate sub- training set for given user-ID
+        if client_id == 0:                                                        # get spk_id for client 1, 80 PAR (50% of ADReSSo)
+            client_spks = ['adrso089', 'adrso148', 'adrso134', 'adrso189', 'adrso205', 'adrso162', 'adrso281', 'adrso156', 'adrso144', 'adrso183', 
+                           'adrso222', 'adrso126', 'adrso223', 'adrso045', 'adrso025', 'adrso182', 'adrso070', 'adrso283', 'adrso098', 'adrso233', 
+                           'adrso071', 'adrso008', 'adrso068', 'adrso154', 'adrso072', 'adrso015', 'adrso274', 'adrso046', 'adrso248', 'adrso141', 
+                           'adrso315', 'adrso027', 'adrso236', 'adrso276', 'adrso031', 'adrso130', 'adrso267', 'adrso090', 'adrso211', 'adrso186', 
+                           'adrso265', 'adrso047', 'adrso259', 'adrso128', 'adrso245', 'adrso229', 'adrso152', 'adrso307', 'adrso151', 'adrso197', 
+                           'adrso109', 'adrso247', 'adrso003', 'adrso054', 'adrso167', 'adrso178', 'adrso308', 'adrso316', 'adrso278', 'adrso300', 
+                           'adrso277', 'adrso012', 'adrso198', 'adrso106', 'adrso158', 'adrso053', 'adrso010', 'adrso160', 'adrso296', 'adrso289', 
+                           'adrso168', 'adrso170', 'adrso187', 'adrso234', 'adrso224', 'adrso280', 'adrso138', 'adrso123', 'adrso056', 'adrso043']
+                                                                                    # 43 AD + 37 HC
+        elif client_id == 1:                                                        # get spk_id for client 2, 81 PAR (50% of ADReSSo)  
+            client_spks = ['adrso032', 'adrso039', 'adrso260', 'adrso110', 'adrso216', 'adrso005', 'adrso028', 'adrso122', 'adrso078', 'adrso285', 
+                           'adrso292', 'adrso014', 'adrso063', 'adrso262', 'adrso036', 'adrso164', 'adrso298', 'adrso218', 'adrso232', 'adrso060', 
+                           'adrso273', 'adrso024', 'adrso172', 'adrso033', 'adrso212', 'adrso173', 'adrso077', 'adrso250', 'adrso253', 'adrso244', 
+                           'adrso092', 'adrso180', 'adrso192', 'adrso215', 'adrso264', 'adrso209', 'adrso309', 'adrso125', 'adrso268', 'adrso017', 
+                           'adrso257', 'adrso302', 'adrso093', 'adrso112', 'adrso177', 'adrso246', 'adrso312', 'adrso249', 'adrso220', 'adrso266', 
+                           'adrso055', 'adrso286', 'adrso237', 'adrso263', 'adrso206', 'adrso202', 'adrso200', 'adrso188', 'adrso142', 'adrso002', 
+                           'adrso161', 'adrso291', 'adrso007', 'adrso059', 'adrso310', 'adrso270', 'adrso016', 'adrso075', 'adrso228', 'adrso159', 
+                           'adrso261', 'adrso074', 'adrso169', 'adrso049', 'adrso116', 'adrso165', 'adrso157', 'adrso299', 'adrso190', 'adrso153', 'adrso035']
+                                                                                    # 44 AD + 37 HC
+        else:
+            print("Train with whole dataset!!")
+            return dataset
         
         print("Generating client training set for client ", str(client_id), "...")
         client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
         
         return client_train_dataset
-    
+
     def test_split(self, dataset, client_id):
         # generate sub- testing set for given user-ID
+        client_test_dataset = dataset
+        """
         if client_id == "public":                                                   # get spk_id for public dataset, 24 PAR (50% of all testing set)
             client_spks = ['S197', 'S163', 'S193', 'S169', 'S196', 'S184', 'S168', 'S205', 'S185', 'S171', 'S204', 'S173', 'S190', 'S191', 'S203', 
                            'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']                                # 12 AD + 12 HC
@@ -387,7 +438,7 @@ class ASRLocalUpdate(object):
         
         print("Generating client testing set for client ", str(client_id), "...")
         client_test_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
-        
+        """
         return client_test_dataset
     
     def record_result(self, trainer, result_folder):                                # save training loss, testing loss, and testing wer
@@ -460,12 +511,15 @@ class ASRLocalUpdate(object):
         training_args.log_path='logs'
         compute_metrics_with_processor = lambda pred: compute_metrics(pred, self.processor)
 
+
+        
         trainer = CustomTrainer(
             model=model,
-            data_collator=self.data_collator,
+            data_collator=self.data_collator_unsupervised,
             args=training_args,
             compute_metrics=compute_metrics_with_processor,
-            train_dataset=self.client_train_dataset,
+            train_dataset=self.client_train_dataset_supervised,
+            # train_dataset=self.client_train_dataset_unsupervised,
             eval_dataset=self.global_test_dataset,
             tokenizer=self.processor.feature_extractor,
             #callbacks=[WERCallback(self.client_train_dataset)], # eval at the end

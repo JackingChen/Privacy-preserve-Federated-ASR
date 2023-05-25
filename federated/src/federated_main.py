@@ -16,7 +16,9 @@ from update import update_network_weight, get_model_weight
 
 from training import client_train, centralized_training, unsupervised_client_train
 from update import ASRLocalUpdate
-
+from datasets import load_dataset, concatenate_datasets
+from utils import prepare_dataset
+from transformers import Wav2Vec2Processor
 def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_supervised, train_dataset_unsupervised, test_dataset, supervised_level):
     train_loss = []                                                                 # list for training loss
     global_weights = None                                                           # initial global_weights
@@ -42,8 +44,9 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_s
                                                                                     # local ASR and AD with global toggling network
                                                                                     # get toggling_network weights from model in model_out_path + "_global/final/"
             if supervised_level == 1:                                               # fully supervised
-                final_result = pool.starmap_async(client_train, [(args, model_in_path_root, model_out_path, train_dataset_supervised, test_dataset, idx,
+                final_result = pool.starmap_async(client_train, [(args, model_in_path_root, model_out_path, train_dataset_supervised, train_dataset_unsupervised, test_dataset, idx,
                                                                   epoch, global_weights) for idx in idxs_users])
+
                                                                                     # train from model in model_in_path 
                                                                                     #                                 + "_global/final/", when stage=0
                                                                                     #                                 + "_client" + str(idx) + "_round" + str(args.epochs-1) + "/final/", o.w.
@@ -99,10 +102,11 @@ def stage1_training(args, train_dataset_supervised, train_dataset_unsupervised, 
     ##########################################################
     
     args.local_ep = args.global_ep                                                  # use number of global epoch for global model
-    # Note !!!!!!!!!!!!!!!!!!!!!!!!!!!!!  要改回來
-    args.STAGE = 0                                                                  # train ASR first
-    centralized_training(args=args, model_in_path=args.pretrain_name, model_out_path=args.model_out_path+"_finetune", 
-                         train_dataset=train_dataset_supervised, test_dataset=test_dataset, epoch=0)
+    skip_centralizeTraining=True
+    if not skip_centralizeTraining:
+        args.STAGE = 0                                                                  # train ASR first
+        centralized_training(args=args, model_in_path=args.pretrain_name, model_out_path=args.model_out_path+"_finetune", 
+                            train_dataset=train_dataset_supervised, test_dataset=test_dataset, epoch=0)
                                                                                     # train from pretrain, final result in args.model_out_path + "_finetune" + "_global/final"
     # args.STAGE = 1                                                                  # then train AD classifier
     # centralized_training(args=args, model_in_path=args.model_out_path+"_finetune_global/final/", 
@@ -114,6 +118,7 @@ def stage1_training(args, train_dataset_supervised, train_dataset_unsupervised, 
     ##########################################################
     args.local_ep = local_epoch                                                     # use the given number of local epoch
     args.STAGE = 0                                                                  # train ASR first
+
     global_weights = FL_training_rounds(args=args, model_in_path_root=args.model_out_path, model_out_path=args.model_out_path+"_finetune",
                                         train_dataset_supervised=train_dataset_supervised, train_dataset_unsupervised=train_dataset_unsupervised,
                                         test_dataset=test_dataset, supervised_level=supervised_level)
@@ -220,6 +225,53 @@ def stage2_training_5050(args, train_dataset, test_dataset):
                                                                                     # final result in args.model_out_path+"2" + "_global/final"
 
 
+import pickle
+import whisper
+import os
+import pandas as pd
+from datasets import Dataset
+class TeacherStudentLearning:
+    def __init__(self, loadpath=None, savepath=None, load_mdl='large-v2'):
+        self.transcript = []
+        self.loadpath = loadpath
+        self.savepath = savepath
+        self.DACS_dataRoot = '/mnt/Internal/FedASR/Data/ADReSSo21/diagnosis/train'
+        out_root='/mnt/Internal/FedASR/Data/ADReSSo21/diagnosis'
+        out_dirname='transcript_whisper'
+        out_filename='train.csv'
+        self.out_file=f"{out_root}/{out_dirname}/{out_filename}"
+        self.model = whisper.load_model(load_mdl)            
+    def add_transcript_to_dataset(self, dataset, transcript_in):
+        dataset = dataset.add_column("text", transcript_in)
+        return dataset
+    
+    def save_transcript(self, dataset,outFile):
+        df = pd.DataFrame(dataset)
+        df.to_csv(outFile, index=False)
+    def load_transcript(self, in_file):
+        df = pd.read_csv(in_file)
+        dataset = Dataset.from_pandas(df)
+        return dataset
+    def transcribe(self, dataset):
+        transcript=[]
+        for i,batch in tqdm(enumerate(dataset)):
+            singleFile=batch['path']
+            file=f'{self.DACS_dataRoot}/clips/{singleFile}'
+            result = self.model.transcribe(file, language="en")
+            pred_text=result['text'].upper().strip()
+            print(pred_text)
+            transcript.append(pred_text)
+        return transcript
+    def transcribe_n_Merge(self, dataset):
+        transcript = self.transcribe(dataset)
+        ds=self.add_transcript_to_dataset(self, dataset, transcript)
+        return ds
+    def FilterAvailAudios(self, dataset):
+            dataset_enoughLen = dataset.filter(lambda example: len(example['array']) >= 1600)
+            dataset_enoughLen_enoughtext = dataset_enoughLen.filter(lambda example: len(example['text']) > 0)
+            return dataset_enoughLen_enoughtext
+
+
 if __name__ == '__main__':
     start_time = time.time()
 
@@ -234,6 +286,47 @@ if __name__ == '__main__':
 
     args.dataset = "adresso"                                                        # get unsupervised dataset (adresso)
     train_dataset_unsupervised, _ = get_dataset(args)                               # get dataset w.o. testing set
+
+    # 創建一個 TranscriptDataset 物件
+    TSL = TeacherStudentLearning()
+    out_root='/mnt/Internal/FedASR/Data'
+    out_dirname='transcript_whisper'
+    out_filename='transcript_train.csv'
+    out_path=f"{out_root}/{out_dirname}"
+    in_file=f"{out_root}/{out_dirname}/{out_filename}"
+    import json
+
+    with open('/home/FedASR/dacs/federated/src/transcript.json') as f:
+        transcript = json.load(f)
+
+
+    train_dataset_addresso=TSL.add_transcript_to_dataset(train_dataset_unsupervised, transcript)
+
+
+    train_dataset_addresso_validated=TSL.FilterAvailAudios(train_dataset_addresso)
+    
+    processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
+    train_dataset_addresso_validated = train_dataset_addresso_validated.map(lambda x: prepare_dataset(x, processor=processor, with_transcript=True), num_proc=10)
+
+    train_dataset_unsupervised=train_dataset_addresso_validated
+    # 获取数据集 A 和 B 的列名
+    # columns_A = train_dataset_supervised.column_names
+    # columns_B = train_dataset_addresso_validated.column_names
+    # 找到重叠的列
+    # overlapping_columns = set(columns_A) & set(columns_B)
+    # Remove_columns_A=set(columns_A) - overlapping_columns
+    # Remove_columns_B=set(columns_B) - overlapping_columns
+    # train_dataset_supervised=train_dataset_supervised.remove_columns(list(Remove_columns_A))
+    # train_dataset_addresso_validated=train_dataset_addresso_validated.remove_columns(list(Remove_columns_B))
+    
+    
+    # 加一個fake的零矩陣符合資料格式
+    # zeros_list = np.zeros(len(train_dataset_addresso_validated))
+    # train_dataset_addresso_validated = train_dataset_addresso_validated.add_column("labels", zeros_list)
+    
+    # train_dataset_supervised = concatenate_datasets([train_dataset_supervised, train_dataset_addresso_validated])
+    # train_dataset_supervised = concatenate_datasets([train_dataset_addresso_validated])
+    print(train_dataset_unsupervised)
     if args.EXTRACT != True:                                                        # Training
         if args.FL_STAGE == 1:
             print("| Start FL Training Stage 1|")

@@ -18,5 +18,8 @@ federated/src/saves/**/*
 ADReSS-IS2020-data/**/*
 PretrainedMdls/**/*
 federated/path.sh
-.gitignore
-
+federated/src/*.ipynb
+federated/src/*.json
+federated/src/*.md
+federated/src/[DEBUG]testWhisper.py
+federated/src/options_debug.py
