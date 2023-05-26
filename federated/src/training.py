@@ -1,5 +1,5 @@
 from options import args_parser
-from update import test_inference, ASRLocalUpdate, get_model_weight
+from update import test_inference, ASRLocalUpdate, ASRGlobalUpdate, get_model_weight
 from utils import get_dataset, average_weights, exp_details
 from ASRLocalUpdate_Multitask import ASRLocalUpdate_multi
 
@@ -25,25 +25,25 @@ def client_train(args, model_in_path_root, model_out_path, train_dataset_supervi
                                  global_test_dataset=test_dataset, client_id=idx, model_in_path=model_in_path, model_out_path=model_out_path)
                                                                                       # initial dataset of current client
 
-    w, loss = local_model.update_weights(global_weights=global_weights, global_round=epoch) 
+    w = local_model.update_weights(global_weights=global_weights, global_round=epoch) 
                                                                                       # from model_in_path model, update certain part using given weight
     
 
-    return w, loss
+    return w
 
 def centralized_training(args, model_in_path, model_out_path, train_dataset, 
                          test_dataset, epoch, client_id="public"):                    # train function for global models, train from model in model_in_path
                                                                                       # final result in model_out_path + "_global/final"
     #logger = SummaryWriter('../logs/' + model_out_path + "_global")                   # current training process
 
-    local_model = ASRLocalUpdate(args=args, dataset=train_dataset,
+    local_model = ASRGlobalUpdate(args=args, dataset=train_dataset,
                         global_test_dataset=test_dataset, client_id=client_id, 
                         model_in_path=model_in_path, model_out_path=model_out_path)   # initial public dataset
     
-    w, loss = local_model.update_weights(global_weights=None, global_round=epoch)     # from model_in_path to train
+    w = local_model.update_weights(global_weights=None, global_round=epoch)     # from model_in_path to train
 
-    return w, loss
-
+    return w
+"""
 def unsupervised_client_train(args, model_in_path_root, model_out_path, train_dataset_supervised, train_dataset_unsupervised,
                               test_dataset, idx, epoch, fully_unsupervised, init_head, global_weights=None):  
                                                                                       # train function for each unsupervised client, train from model in model_in_path 
@@ -72,3 +72,4 @@ def unsupervised_client_train(args, model_in_path_root, model_out_path, train_da
     w, loss = local_model.update_weights_adapted(global_weights=global_weights, global_round=epoch, init_head=init_head, fully_unsupervised=fully_unsupervised) 
                                                                                       # from model_in_path model, update certain part using given weight
     return w, loss
+"""

@@ -52,6 +52,7 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_s
                                                                                     #                                 + "_client" + str(idx) + "_round" + str(args.epochs-1) + "/final/", o.w.
                                                                                     # or model in last round
                                                                                     # final result in model_out_path + "_client" + str(client_id) + "_round" + str(global_round)
+            """
             elif supervised_level == 0.5:                                           # unsupervised, then supervised training
                 final_result = pool.starmap_async(unsupervised_client_train, [(args, model_in_path_root, model_out_path, train_dataset_supervised, train_dataset_unsupervised,
                                                 test_dataset, idx, epoch, False, True, global_weights) for idx in idxs_users])
@@ -68,6 +69,7 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_s
                                                                                     #                                 + "_client" + str(idx) + "_round" + str(args.epochs-1) + "_unsuper/final/", o.w.
                                                                                     # or model in last round
                                                                                     # final result in model_out_path + "_client" + str(client_id) + "_round" + str(global_round) + "_unsuper"     
+        """                                                                                                                                            
         except Exception as e:
             print(f"An error occurred while running local_model.update_weights(): {str(e)}")
         
@@ -76,13 +78,14 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_s
             results = final_result.get()                                            # get results
         
         for idx in range(len(results)):                                             # for each participated clients
-            w, loss = results[idx]                                                  # function client_train returns w & loss
+            # w, loss = results[idx]                                                  # function client_train returns w & loss
+            w = results[idx]
             if args.STAGE == 0:                                                     # train ASR
                 local_weights_en.append(copy.deepcopy(w[0]))                        # save encoder weight for this client
                 local_weights_de.append(copy.deepcopy(w[1]))                        # save decoder weight for this client
             else:                                                                   # train AD classifier or toggling network
                 local_weights.append(copy.deepcopy(w))
-            local_losses.append(loss)
+            # local_losses.append(loss)
 
         # aggregate weights
         if args.STAGE == 0:                                                         # train ASR
@@ -90,8 +93,8 @@ def FL_training_rounds(args, model_in_path_root, model_out_path, train_dataset_s
         else:                                                                       # train AD classifier or toggling network
             global_weights = average_weights(local_weights)
 
-        loss_avg = sum(local_losses) / len(local_losses)                            # average losses from participated client
-        train_loss.append(loss_avg)                                                 # save loss for this round
+        # loss_avg = sum(local_losses) / len(local_losses)                            # average losses from participated client
+        # train_loss.append(loss_avg)                                                 # save loss for this round
     return global_weights
 
 # FL stage 1: ASR & AD Classifier
@@ -281,6 +284,8 @@ if __name__ == '__main__':
     args = args_parser()                                                            # get configuration
     exp_details(args)                                                               # print out details based on configuration
 
+
+    # TODO 用args來選要不要放這個資料庫
     args.dataset = "adress"                                                         # get supervised dataset (adress)
     train_dataset_supervised, test_dataset = get_dataset(args)                      # get dataset
 

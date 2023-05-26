@@ -333,11 +333,202 @@ def debug_decorator(func):
         print(f"Length of Result: {len(result)}")
         return result
     return wrapper
+
+class ASRGlobalUpdate(object):
+    def __init__(self, args, dataset, global_test_dataset, client_id, 
+                 model_in_path, model_out_path):
+        self.args = args                                                            # given configuration
+        self.client_train_dataset = self.train_split(dataset, client_id)            # get subset of training set (dataset of THIS client)
+        
+        self.device = 'cuda' if args.gpu else 'cpu'                                 # use gpu or cpu
+        
+        self.global_test_dataset = global_test_dataset
+        self.client_test_dataset = self.test_split(global_test_dataset, client_id)  # get subset of testing set (dataset of THIS client)
+        self.processor = Wav2Vec2Processor.from_pretrained(args.pretrain_name)
+        self.data_collator = DataCollatorCTCWithPadding(processor=self.processor, padding=True)
+        self.client_id = client_id
+
+        self.model_in_path = model_in_path                                          # no info for client_id & global_round
+        self.model_out_path = model_out_path                                        # no info for client_id & global_round
+
+    def train_split(self, dataset, client_id):
+        # generate sub- training set for given user-ID
+        if client_id == "public":                                                   # get spk_id for public dataset, 54 PAR (50% of all training set)
+            client_spks = ['S086', 'S021', 'S018', 'S156', 'S016', 'S077', 'S027', 'S116', 'S143', 'S082', 'S039', 'S150', 'S004', 'S126', 'S137', 
+            'S097', 'S128', 'S059', 'S096', 'S081', 'S135', 'S094', 'S070', 'S049', 'S080', 'S040', 'S076', 'S093', 'S141', 'S034', 'S056', 'S090', 
+            'S130', 'S092', 'S055', 'S019', 'S154', 'S017', 'S114', 'S100', 'S036', 'S029', 'S127', 'S073', 'S089', 'S051', 'S005', 'S151', 'S003', 
+            'S033', 'S007', 'S084', 'S043', 'S009']                                 # 27 AD + 27 HC
+        elif client_id == "public2":                                                # get spk_id for public dataset, 54 PAR (50% of all training set) from clients
+            client_spks = ['S058', 'S030', 'S064', 'S104', 'S048', 'S118', 'S122', 'S001', 'S087', 'S013', 'S025', 'S083', 'S067', 'S068', 'S111', 
+            'S028', 'S015', 'S108', 'S095', 'S002', 'S072', 'S020', 'S148', 'S144', 'S110', 'S124', 'S129', 'S071', 'S136', 'S140', 'S145', 'S032', 
+            'S101', 'S103', 'S139', 'S038', 'S153', 'S035', 'S011', 'S132', 'S006', 'S149', 'S041', 'S079', 'S107', 'S063', 'S061', 'S125', 'S062', 
+            'S012', 'S138', 'S024', 'S052', 'S142']                                 
+        else:
+            print("Train with whole dataset!!")
+            return dataset
+        
+        print("Generating client training set for client ", str(client_id), "...")
+        client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
+        
+        return client_train_dataset
     
+    def test_split(self, dataset):
+        # generate sub- testing set for given user-ID
+        client_test_dataset = dataset
+        """
+        if client_id == "public":                                                   # get spk_id for public dataset, 24 PAR (50% of all testing set)
+            client_spks = ['S197', 'S163', 'S193', 'S169', 'S196', 'S184', 'S168', 'S205', 'S185', 'S171', 'S204', 'S173', 'S190', 'S191', 'S203', 
+                           'S180', 'S165', 'S199', 'S160', 'S175', 'S200', 'S166', 'S177', 'S167']                                # 12 AD + 12 HC
+
+        elif client_id == 0:                                                        # get spk_id for client 1, 12 PAR (25% of all testing set)
+            client_spks = ['S198', 'S182', 'S194', 'S161', 'S195', 'S170', 'S187', 'S192', 'S178', 'S201', 'S181', 'S174']
+                                                                                    # 6 AD + 6 HC
+        elif client_id == 1:                                                        # get spk_id for client 2, 12 PAR (25% of all testing set)  
+            client_spks = ['S179', 'S188', 'S202', 'S162', 'S172', 'S183', 'S186', 'S207', 'S189', 'S164', 'S176', 'S206']
+                                                                                    # 6 AD + 6 HC
+        else:
+            print("Test with whole dataset!!")
+            return dataset
+        
+        print("Generating client testing set for client ", str(client_id), "...")
+        client_test_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
+        """
+        return client_test_dataset
+    
+    def record_result(self, trainer, result_folder):                                # save training loss, testing loss, and testing wer
+        logger = SummaryWriter('./logs/' + result_folder.split("/")[-1])           # use name of this model as folder's name
+
+        for idx in range(len(trainer.state.log_history)):
+            if "loss" in trainer.state.log_history[idx].keys():                     # add in training loss, epoch*100 to obtain int
+                logger.add_scalar('Loss/train', trainer.state.log_history[idx]["loss"], trainer.state.log_history[idx]["epoch"]*100)
+
+            elif "eval_loss" in trainer.state.log_history[idx].keys():              # add in testing loss & WER, epoch*100 to obtain int
+                logger.add_scalar('Loss/test', trainer.state.log_history[idx]["eval_loss"], trainer.state.log_history[idx]["epoch"]*100)
+                logger.add_scalar('wer/test', trainer.state.log_history[idx]["eval_wer"], trainer.state.log_history[idx]["epoch"]*100)
+
+            else:                                                                   # add in final training loss, epoch*100 to obtain int
+                logger.add_scalar('Loss/train', trainer.state.log_history[idx]["train_loss"], trainer.state.log_history[idx]["epoch"]*100)
+        logger.close()
+
+    def update_weights(self, global_weights, global_round):
+        if global_weights == None:                                                  # train from model from model_in_path
+            mask_time_prob = 0                                                      # change config to avoid training stopping
+            config = Data2VecAudioConfig.from_pretrained(self.args.pretrain_name, mask_time_prob=mask_time_prob)
+                                                                                    # use pre-trained config
+            model = Data2VecAudioForCTC.from_pretrained(self.model_in_path, config=config, args=self.args)
+            model.config.ctc_zero_infinity = True                                   # to avoid inf values
+        else:                                                                       # update train model using given weight
+            if self.args.STAGE == 0:                                                # train ASR
+                model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="ASR")                    
+                                                                                    # from model from model_in_path, update ASR's weight
+            elif self.args.STAGE == 1:                                              # train AD classifier
+                model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="AD")           
+                                                                                    # from model from model_in_path, update AD classifier's weight
+            elif self.args.STAGE == 2:                                              # train toggling network
+                model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="toggling_network")             
+                                                                                    # from model from model_in_path, update arbitrator's weight
+        global log_path
+        log_path = self.args.log_path
+
+        model.train()
+        if self.args.STAGE == 0:                                                    # fine-tune ASR
+            lr = 1e-5
+        elif self.args.STAGE == 1:                                                  # train AD classifier
+            lr = 1e-4
+        elif self.args.STAGE == 2:                                                  # train toggling network
+            lr = 1e-3
+
+        save_path = self.model_out_path + "_global"
+
+        training_args = TrainingArguments(
+            output_dir=save_path,
+            group_by_length=True,
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            evaluation_strategy="steps",
+            num_train_epochs=self.args.local_ep, #self.args.local_ep
+            fp16=True,
+            gradient_checkpointing=True, 
+            save_steps=500, # 500
+            eval_steps=100, # 500
+            logging_steps=10, # 500
+            learning_rate=lr, # self.args.lr
+            weight_decay=0.005,
+            warmup_steps=1000,
+            save_total_limit=2,
+            log_level='debug',
+            logging_strategy="steps",
+            #adafactor=True,            # default:false. Whether or not to use transformers.Adafactor optimizer instead of transformers.AdamW
+            #fp16_full_eval=True,      # to save memory
+            #max_grad_norm=0.5
+        )
+        #global processor
+        #processor = self.processor
+        compute_metrics_with_processor = lambda pred: compute_metrics(pred, self.processor)
+
+        trainer = CustomTrainer(
+            model=model,
+            data_collator=self.data_collator,
+            args=training_args,
+            compute_metrics=compute_metrics_with_processor, #compute_metrics,
+            train_dataset=self.client_train_dataset,
+            eval_dataset=self.global_test_dataset,
+            tokenizer=self.processor.feature_extractor,
+            #callbacks=[WERCallback(self.client_train_dataset)], # eval at the end
+        )
+
+        print(" | Client ", str(self.client_id), " ready to train! |")
+        trainer.train()
+        trainer.save_model(save_path + "/final")                                    # save final model
+        self.record_result(trainer, save_path)                           # save training loss, testing loss, and testing wer
+
+        # get "network" weights from model in source_path
+        if self.args.STAGE == 0:                                                    # train ASR
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="ASR")
+        elif self.args.STAGE == 1:                                                  # train AD classifier
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="AD")
+        elif self.args.STAGE == 2:                                                  # train toggling_network
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="toggling_network")  
+         
+        return return_weights
+
+    def extract_embs(self):                                                         # extract emb. using model in args.model_in_path
+        # load model
+        mask_time_prob = 0                                                          # change config to avoid code from stopping
+        config = Data2VecAudioConfig.from_pretrained(self.args.pretrain_name, mask_time_prob=mask_time_prob)
+        model = Data2VecAudioForCTC_eval.from_pretrained(self.args.model_in_path, config=config, args=self.args)
+        processor = self.processor
+
+        # get emb.s, masks... 1 sample by 1 sample for client test
+        df = map_to_result(self.client_test_dataset[0], processor, model, 0)
+        for i in range(len(self.client_test_dataset) - 1):
+            df2 = map_to_result(self.client_test_dataset[i+1], processor, model, i+1)
+            df = pd.concat([df, df2], ignore_index=True)
+            print("\r"+ str(i), end="")
+
+        csv_path = "./results/" + self.args.csv_path + ".csv"
+        df.to_csv(csv_path)
+        print("Testing data Done")
+
+        # get emb.s, masks... 1 sample by 1 sample for client train
+        df = map_to_result(self.client_train_dataset[0], processor, model, 0)
+        for i in range(len(self.client_train_dataset) - 1):
+            df2 = map_to_result(self.client_train_dataset[i+1], processor, model, i+1)
+            df = pd.concat([df, df2], ignore_index=True)
+            print("\r"+ str(i), end="")
+
+        csv_path = "./results/" + self.args.csv_path + "_train.csv"
+        df.to_csv(csv_path)
+        print("Training data Done")
+
+        print(self.args.csv_path + " All Done")
+
 class ASRLocalUpdate(object):
     def __init__(self, args, dataset_supervised, dataset_unsupervised, global_test_dataset, client_id, 
                  model_in_path, model_out_path):
         self.args = args                                                            # given configuration
+        self.client_train_dataset_supervised=None
+        self.client_train_dataset_unsupervised=None
         if dataset_supervised is not None:
             self.client_train_dataset_supervised = self.train_split_supervised(dataset_supervised, client_id)            
                                                                                     # get subset of training set (dataset of THIS client)
@@ -417,7 +608,6 @@ class ASRLocalUpdate(object):
         client_train_dataset = dataset.filter(lambda example: example["path"].startswith(tuple(client_spks)))
         
         return client_train_dataset
-
     def test_split(self, dataset, client_id):
         # generate sub- testing set for given user-ID
         client_test_dataset = dataset
@@ -441,7 +631,7 @@ class ASRLocalUpdate(object):
         """
         return client_test_dataset
     
-    def record_result(self, trainer, result_folder):                                # save training loss, testing loss, and testing wer
+    def record_result(self, trainer ,result_folder):                                # save training loss, testing loss, and testing wer
         logger = SummaryWriter('./logs/' + result_folder.split("/")[-1])           # use name of this model as folder's name
 
         for idx in range(len(trainer.state.log_history)):
@@ -456,6 +646,59 @@ class ASRLocalUpdate(object):
                 logger.add_scalar('Loss/train', trainer.state.log_history[idx]["train_loss"], trainer.state.log_history[idx]["epoch"]*100)
         logger.close()
 
+    def _Tordin(self,model, client_train_dataset,global_round,save_path):
+        model.train()
+        if self.args.STAGE == 0:                                                    # fine-tune ASR
+            lr = 1e-5
+        elif self.args.STAGE == 1:                                                  # train AD classifier
+            lr = 1e-4
+        elif self.args.STAGE == 2:                                                  # train toggling network
+            lr = 1e-3                                                               # for local models, record info for id & num_round
+        training_args = TrainingArguments(
+            output_dir=save_path,
+            group_by_length=True,
+            per_device_train_batch_size=self.args.train_batch_size,
+            per_device_eval_batch_size=self.args.eval_batch_size,
+            evaluation_strategy="steps",
+            num_train_epochs=self.args.local_ep, #self.args.local_ep
+            fp16=True,
+            gradient_checkpointing=True, 
+            save_steps=500, # 500
+            eval_steps=self.args.eval_steps, # 500
+            logging_steps=10, # 500
+            learning_rate=lr, # self.args.lr
+            weight_decay=0.005,
+            warmup_steps=1000,
+            save_total_limit=2,
+            log_level='debug',
+            logging_strategy="steps",
+            #adafactor=True,            # default:false. Whether or not to use transformers.Adafactor optimizer instead of transformers.AdamW
+            #fp16_full_eval=True,      # to save memory
+            #max_grad_norm=0.5
+        )
+        training_args.log_path='logs'
+        compute_metrics_with_processor = lambda pred: compute_metrics(pred, self.processor)
+        trainer = CustomTrainer(
+            model=model,
+            data_collator=self.data_collator_unsupervised,
+            args=training_args,
+            compute_metrics=compute_metrics_with_processor,
+            train_dataset=client_train_dataset,
+            eval_dataset=self.global_test_dataset,
+            tokenizer=self.processor.feature_extractor,
+        )
+        print(" | Client ", str(self.client_id), " ready to train! |")
+        trainer.train()
+        trainer.save_model(save_path + "/final")                                    # save final model
+        self.record_result(trainer, save_path)                           # save training loss, testing loss, and testing wer
+        # get "network" weights from model in source_path
+        if self.args.STAGE == 0:                                                    # train ASR
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="ASR")
+        elif self.args.STAGE == 1:                                                  # train AD classifier
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="AD")
+        elif self.args.STAGE == 2:                                                  # train toggling_network
+            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="toggling_network")  
+        return return_weights
     def update_weights(self, global_weights, global_round):
         if global_weights == None:                                                  # train from model from model_in_path
             mask_time_prob = 0                                                      # change config to avoid training stopping
@@ -473,6 +716,23 @@ class ASRLocalUpdate(object):
             elif self.args.STAGE == 2:                                              # train toggling network
                 model = update_network_weight(args=self.args, source_path=self.model_in_path, target_weight=global_weights, network="toggling_network")             
                                                                                     # from model from model_in_path, update arbitrator's weight
+        """
+        if self.client_id == "public":                                              # model train with public dataset, name end with "_global"
+            save_path = self.model_out_path + "_global"
+        else:
+            save_path = self.model_out_path + "_client" + str(self.client_id) + "_round" + str(global_round)
+        """
+        if self.client_train_dataset_unsupervised is not None:
+            save_path = self.model_out_path + "_client" + str(self.client_id) + "_round" + str(global_round) + "_Training" + "AddressoWhisper"
+            W_o=self._Tordin(self,model, self.client_train_dataset_unsupervised,global_round,save_path)
+            model=update_network_weight(args=self.args, source_path=save_path, target_weight=W_o, network="ASR") 
+        if self.client_train_dataset_unsupervised is not None:
+            save_path = self.model_out_path + "_client" + str(self.client_id) + "_round" + str(global_round) + "_Training" + "Address"
+            W_a=self._Tordin(self,model, self.client_train_dataset_supervised,global_round,save_path)
+            model=update_network_weight(args=self.args, source_path=save_path, target_weight=W_a, network="ASR") 
+        # 如果local兩個dataset都是None就會直接採用global來的weight
+        """
+        # T_ordin
         model.train()
         if self.args.STAGE == 0:                                                    # fine-tune ASR
             lr = 1e-5
@@ -511,8 +771,6 @@ class ASRLocalUpdate(object):
         training_args.log_path='logs'
         compute_metrics_with_processor = lambda pred: compute_metrics(pred, self.processor)
 
-
-        
         trainer = CustomTrainer(
             model=model,
             data_collator=self.data_collator_unsupervised,
@@ -529,16 +787,9 @@ class ASRLocalUpdate(object):
         trainer.train()
         trainer.save_model(save_path + "/final")                                    # save final model
         self.record_result(trainer, save_path)                           # save training loss, testing loss, and testing wer
-
-        # get "network" weights from model in source_path
-        if self.args.STAGE == 0:                                                    # train ASR
-            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="ASR")
-        elif self.args.STAGE == 1:                                                  # train AD classifier
-            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="AD")
-        elif self.args.STAGE == 2:                                                  # train toggling_network
-            return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="toggling_network")  
-         
-        return return_weights, trainer.state.log_history[-1]["train_loss"]          # return weight, average losses for this round
+        """
+        return_weights = get_model_weight(args=self.args, source_path=save_path + "/final/", network="ASR")  
+        return return_weights          # return weight, average losses for this round
 
     def extract_embs(self):                                                         # extract emb. using model in args.model_in_path
         # load model
