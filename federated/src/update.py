@@ -446,7 +446,7 @@ class ASRGlobalUpdate(object):
             per_device_train_batch_size=1,
             per_device_eval_batch_size=1,
             evaluation_strategy="steps",
-            num_train_epochs=self.args.local_ep, #self.args.local_ep
+            num_train_epochs=self.args.global_ep, 
             fp16=True,
             gradient_checkpointing=True, 
             save_steps=500, # 500
