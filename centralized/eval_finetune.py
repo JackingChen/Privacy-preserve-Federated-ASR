@@ -266,7 +266,7 @@ def map_to_result(batch, idx):
                 # 'input_values': str(subset_dataset[i]["input_values"]),               # input of the model
                 # 'labels': str(subset_dataset[i]["labels"]),
                 # 'ASR logits': str(logits["ASR logits"][i].tolist()),
-                'hidden_states': str(logits["hidden_states"].tolist()),
+                'hidden_states': logits["hidden_states"].tolist(),
                 'pred_str': batch["pred_str"]},
                 index=[idx])
     return df
@@ -378,17 +378,17 @@ with open(f"{savePath}/{csv_name}_train.pkl", "wb") as f:
 print("Training data Done")
 
 # store result of dev data
-"""
-dev_data = csv2dataset(path = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/mid_csv/dev.csv")
+dev_data = csv2dataset(audio_path = '{}/clips/'.format(args.root_dir),
+                       csv_path = "{}/mid_csv/dev.csv".format(args.root_dir))
 dev_data = dev_data.map(prepare_dataset, num_proc=10)
 
-df = map_to_result(dev_data[0], 0)
-for i in range(len(dev_data) - 1):
-    df2 = map_to_result(dev_data[i+1], i+1)
-    df = pd.concat([df, df2], ignore_index=True)
-    print("\r"+ str(i), end="")
+# df = map_to_result(dev_data[0], 0)
+# for i in range(len(dev_data) - 1):
+#     df2 = map_to_result(dev_data[i+1], i+1)
+#     df = pd.concat([df, df2], ignore_index=True)
+#     print("\r"+ str(i), end="")
+df_dev=Extract_Emb(dev_data,GPU_batchsize=args.GPU_batchsize)
+with open(f"{savePath}/{csv_name}_dev.pkl", "wb") as f:
+    pickle.dump(df_dev, f)
+print("Dev data Done")
 
-csv_path = "./saves/results/" + csv_name + "_dev.csv"
-df.to_csv(csv_path)
-"""
-print(csv_name + " All Done")
