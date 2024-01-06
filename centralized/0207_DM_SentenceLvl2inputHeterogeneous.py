@@ -30,7 +30,7 @@ from sklearn.model_selection import train_test_split
 from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 from transformers import BertTokenizer, BertConfig, BertModel,XLMTokenizer, XLMModel
 
-from Dementia_challenge_models import SingleForwardModel, BertPooler, Audio_pretrain, ModelArg, Model_settings_dict, Text_pretrain
+from Dementia_challenge_models import SingleForwardModel, BertPooler, Audio_pretrain, ModelArg, Model_settings_dict, Text_pretrain, Text_Summary
 import librosa
 
 class Model(SingleForwardModel):
@@ -71,18 +71,46 @@ class Model(SingleForwardModel):
         self.df_dev=self._Tokenize(df_dev, self.inp1_embed_type, self.inp1Arg.inp_col_name, self.inp1_tokenizer)
         self.df_test=self._Tokenize(df_test, self.inp1_embed_type, self.inp1Arg.inp_col_name, self.inp1_tokenizer)
 
-        self.df_train=self._Tokenize(self.df_train, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
-        self.df_dev=self._Tokenize(self.df_dev, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
-        self.df_test=self._Tokenize(self.df_test, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
-
+        self._preprocess_loaded_summaries(self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
+        self._merge_DataAug2Data()
         print(f'# of train:{len(df_train)}, val:{len(df_dev)}, test:{len(df_test)}')
-        
-        
         self._df2Dataset()
+
+    def _preprocess_loaded_summaries(self,inp2_embed_type,inp_col_name,inp2_tokenizer):
+        df_train = pd.read_pickle(f"{self.inp2Arg.file_in}/train.pkl")
+        df_dev = pd.read_pickle(f"{self.inp2Arg.file_in}/dev.pkl")
+        df_test = pd.read_pickle(f"{self.inp2Arg.file_in}/test.pkl")
+
+
+        df_train=self._Tokenize(df_train, inp2_embed_type,inp_col_name, inp2_tokenizer)
+        df_dev=self._Tokenize(df_dev, inp2_embed_type,inp_col_name, inp2_tokenizer)
+        df_test=self._Tokenize(df_test, inp2_embed_type,inp_col_name, inp2_tokenizer)
+
+        
+        df_test = df_test.reset_index(drop=True)
+        self.df_train_aug=df_train
+        self.df_dev_aug=df_dev
+        self.df_test_aug=df_test
+        self.Aug_col_name=self.inp2Arg.inp_col_name
+
+    def _merge_DataAug2Data(self):
+        pname_col_name='ID   '
+        similar_col_name='session'
+        def AppendID(df_data):
+            if pname_col_name not in df_data.columns:
+                df_data[pname_col_name]=df_data[similar_col_name]
+        AppendID(self.df_train_aug)
+        AppendID(self.df_dev_aug)
+        AppendID(self.df_test_aug)
+
+        self.df_train = pd.merge(self.df_train, self.df_train_aug, on='ID   ', how='left', suffixes=('', '_aug'))
+        self.df_dev = pd.merge(self.df_dev, self.df_dev_aug, on='ID   ', how='left', suffixes=('', '_aug'))
+        self.df_test = pd.merge(self.df_test, self.df_test_aug, on='ID   ', how='left', suffixes=('', '_aug'))
+ 
     def _df2Dataset(self):
         dtype1=self._DecideDtype(self.inp1_embed_type)
         dtype2=self._DecideDtype(self.inp2_embed_type)
-
+        
         self.train_data = TensorDataset(
             torch.tensor(self.df_train[self.inp1Arg.inp_col_name].tolist(), dtype=dtype1),
             torch.tensor(self.df_train[self.inp2Arg.inp_col_name].tolist(), dtype=dtype2),
@@ -101,6 +129,9 @@ class Model(SingleForwardModel):
             torch.tensor(self.df_test[self.label_cols].tolist(), dtype=torch.long),
              torch.tensor(self.df_test.index.tolist(), dtype=torch.long),
         )
+
+
+
 
     def training_step(self, batch, batch_idx):
         inp1, inp2, labels = batch  
@@ -158,9 +189,14 @@ class Model(SingleForwardModel):
             'y_true': y_true,
             'y_pred': y_pred,
         }
-    def _safe_output(self):
-        self.outStr=f'{self.inp1_embed_type.replace("/","__")}_{self.inp2_embed_type.replace("/","__")}'
 
+    def _save_results_to_csv(self, df_result, pred_dict, args, suffix):
+        # Save df_result to CSV
+        df_result.to_csv(f'{args.Output_dir}/{self.inp1_embed_type}_{self.inp2_embed_type}{suffix}.csv')
+
+        # Save pred_df to CSV
+        pred_df = pd.DataFrame(pred_dict)
+        pred_df.to_csv(f'{args.Output_dir}/{self.inp1_embed_type}_{self.inp2_embed_type}{suffix}_pred.csv')
 
 
 
@@ -191,11 +227,10 @@ def main(args,config):
     print(":: Start Training ::")
     #     
     trainer = Trainer(
-        logger=True,
-        callbacks=[early_stop_callback,checkpoint_callback],
-        # callbacks=[early_stop_callback],
+        logger=False,
+        # callbacks=[early_stop_callback,checkpoint_callback],
+        callbacks=[early_stop_callback],
         enable_checkpointing = True,
-        # enable_checkpointing = False,
         max_epochs=args.mdlArg.epochs,
         fast_dev_run=args.mdlArg.test_mode,
         num_sanity_val_steps=None if args.mdlArg.test_mode else 0,

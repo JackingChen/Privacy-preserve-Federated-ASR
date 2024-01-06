@@ -63,21 +63,19 @@ class Model(SingleForwardModel):
     
         return logits
     def preprocess_dataframe(self):
-        
-        df_train = pd.read_csv(f"{self.inp1Arg.file_in}/train.csv")
-        df_dev = pd.read_csv(f"{self.inp1Arg.file_in}/dev.csv")
-        df_test = pd.read_csv(f"{self.inp1Arg.file_in}/test.csv")
+        df_train = pd.read_pickle(f"{self.inp1Arg.file_in}/train.pkl")
+        df_dev = pd.read_pickle(f"{self.inp1Arg.file_in}/dev.pkl")
+        df_test = pd.read_pickle(f"{self.inp1Arg.file_in}/test.pkl")
         self.df_train=self._Tokenize(df_train, self.inp1_embed_type, self.inp1Arg.inp_col_name, self.inp1_tokenizer)
         self.df_dev=self._Tokenize(df_dev, self.inp1_embed_type, self.inp1Arg.inp_col_name, self.inp1_tokenizer)
         self.df_test=self._Tokenize(df_test, self.inp1_embed_type, self.inp1Arg.inp_col_name, self.inp1_tokenizer)
-
+        
         self.df_train=self._Tokenize(self.df_train, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
         self.df_dev=self._Tokenize(self.df_dev, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
         self.df_test=self._Tokenize(self.df_test, self.inp2_embed_type,self.inp2Arg.inp_col_name, self.inp2_tokenizer)
-
+        self.df_test = self.df_test.reset_index(drop=True)
+        
         print(f'# of train:{len(df_train)}, val:{len(df_dev)}, test:{len(df_test)}')
-        
-        
         self._df2Dataset()
     def _df2Dataset(self):
         dtype1=self._DecideDtype(self.inp1_embed_type)
@@ -158,9 +156,11 @@ class Model(SingleForwardModel):
             'y_true': y_true,
             'y_pred': y_pred,
         }
-    def _safe_output(self):
-        self.outStr=f'{self.inp1_embed_type.replace("/","__")}_{self.inp2_embed_type.replace("/","__")}'
 
+    def _safe_output(self):
+        inp1_embed_type=self.inp1_embed_type.replace("/","__")
+        inp2_embed_type=self.inp2_embed_type.replace("/","__")
+        self.outStr=f'{inp1_embed_type}_{inp2_embed_type})'
 
 
 
@@ -191,11 +191,10 @@ def main(args,config):
     print(":: Start Training ::")
     #     
     trainer = Trainer(
-        logger=True,
-        callbacks=[early_stop_callback,checkpoint_callback],
-        # callbacks=[early_stop_callback],
+        logger=False,
+        # callbacks=[early_stop_callback,checkpoint_callback],
+        callbacks=[early_stop_callback],
         enable_checkpointing = True,
-        # enable_checkpointing = False,
         max_epochs=args.mdlArg.epochs,
         fast_dev_run=args.mdlArg.test_mode,
         num_sanity_val_steps=None if args.mdlArg.test_mode else 0,

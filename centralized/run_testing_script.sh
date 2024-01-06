@@ -37,11 +37,20 @@ rm -f "$errors_file"
 #         pids+=($!)
 #     done
 # fi
+# if [ "$stage" -le 0 ]; then
+#     # test_mdls=(en gr multi wv)
+#     # test_mdls=(en gr multi wv mbert_sentence xlm_sentence)
+#     test_mdls=(mbert_session xlm_session)
+#     for inpm in "${test_mdls[@]}"; do
+#         CUDA_VISIBLE_DEVICES=0,1,2,3 python 0207_DM_SessionLvl1input.py --inp_embed "$inpm" --epochs 1 &
+#         pids+=($!)
+#     done
+# fi
 if [ "$stage" -le 1 ]; then
-    # test_mdls1=(en gr multi wv)
-    # test_mdls2=(mbert_sentence xlm_sentence)
-    test_mdls1=(en)
-    test_mdls2=(mbert_sentence)
+    test_mdls1=(en gr wv)
+    test_mdls2=(mbert_sentence xlm_sentence)
+    # test_mdls1=(en)
+    # test_mdls2=(mbert_sentence)
     for inpm1 in "${test_mdls1[@]}"; do
         for inpm2 in "${test_mdls2[@]}"; do
             CUDA_VISIBLE_DEVICES=0,1,2,3 python 0207_DM_SentenceLvl2inputHomogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 1 &
@@ -49,6 +58,47 @@ if [ "$stage" -le 1 ]; then
         done
     done
 fi
+if [ "$stage" -le 2 ]; then
+    # test_mdls1=(en gr wv mbert_sentence xlm_sentence)
+    # test_mdls2=(anomia)
+    test_mdls1=(en)
+    test_mdls2=(anomia)
+    for inpm1 in "${test_mdls1[@]}"; do
+        for inpm2 in "${test_mdls2[@]}"; do
+            CUDA_VISIBLE_DEVICES=0,1,2,3 python 0207_DM_SentenceLvl2inputHeterogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 1 &
+              pids+=($!)
+        done
+    done
+fi
+# if [ "$stage" -le 2 ]; then
+#     # test_mdls1=(en gr wv mbert_sentence xlm_sentence)
+#     # test_mdls2=(anomia)
+#     test_mdls1=(mbert_session)
+#     test_mdls2=(anomia)
+#     for inpm1 in "${test_mdls1[@]}"; do
+#         for inpm2 in "${test_mdls2[@]}"; do
+#             CUDA_VISIBLE_DEVICES=0,1,2,3 python 0207_DM_SessionLvl2inputHomogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 1 &
+#               pids+=($!)
+#         done
+#     done
+# fi
+# if [ "$stage" -le 3 ]; then
+#     # test_mdls1=(en gr wv mbert_sentence xlm_sentence)
+#     # test_mdls2=(anomia)
+#     test_mdls1=(en)
+#     test_mdls2=(mbert_sentence)
+#     test_mdls3=(anomia)
+#     for inpm1 in "${test_mdls1[@]}"; do
+#         for inpm2 in "${test_mdls2[@]}"; do
+#             for inpm3 in "${test_mdls3[@]}"; do
+#                 CUDA_VISIBLE_DEVICES=0,1,2,3 python 0207_DM_SentenceLvl3inputHeterogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --inp3_embed "$inpm3" --epochs 1 &
+#                 pids+=($!)
+#             done
+#         done
+#     done
+# fi
+
+
 # Wait for all background processes to finish
 for pid in "${pids[@]}"; do
     wait "$pid"

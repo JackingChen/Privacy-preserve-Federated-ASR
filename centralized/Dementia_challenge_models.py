@@ -29,6 +29,7 @@ from sklearn.model_selection import train_test_split
 
 from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 from transformers import BertTokenizer, BertConfig, BertModel,XLMTokenizer, XLMModel
+from transformers import AutoTokenizer, AutoModel
 from prompts import assesmentPrompt_template, Instruction_templates, Psychology_template,\
     Sensitive_replace_dict, generate_psychology_prompt
 import openai
@@ -56,7 +57,21 @@ Embsize_map={}
 Embsize_map['t_hidden_size']={'xlm':1280,'mbert':768,'Semb':1536,'Embedding':350}
 
 Audio_pretrain=set(['en','gr','multi','wv'])
-Text_pretrain=set(['mbert_sentence','mbert_session','xlm_sentence','xlm_session','Semb','Embedding'])
+xlm_mlm_100_1280=set(['xlm_sentence','xlm_session'])
+mbert_series=set(['mbert_sentence','mbert_session',])
+bert_library=set(["bert-base-uncased",
+                "xlm-roberta-base",
+                "albert-base-v1",
+                "xlnet-base-cased",
+                "emilyalsentzer/Bio_ClinicalBERT",
+                "dmis-lab/biobert-base-cased-v1.2",
+                "YituTech/conv-bert-base",])
+Text_Summary=set(['anomia'])
+
+Text_pretrain = xlm_mlm_100_1280 | mbert_series | bert_library
+
+
+# ,'Semb','Embedding'
 Model_settings_dict=Dict()
 Model_settings_dict['mbert_sentence']={
     'inp_col_name': 'text',
@@ -98,6 +113,66 @@ Model_settings_dict['wv']={
     'inp_hidden_size': 512,
     'file_in':'/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
 }
+Model_settings_dict['anomia']={
+    'inp_col_name': 'Psych_Summary',
+    'inp_hidden_size': Embsize_map['t_hidden_size']['mbert'], # use mbert to tokenize and model it
+    'file_in':'/mnt/External/Seagate/FedASR/LLaMa2/dacs/EmbFeats/Lexical/Embeddings/text_data2vec-audio-large-960h_Phych-anomia',
+}
+
+model_settings_dict = {
+    'bert-base-uncased': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'xlm-roberta-base': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'albert-base-v1': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'xlnet-base-cased': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'emilyalsentzer/Bio_ClinicalBERT': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'dmis-lab/biobert-base-cased-v1.2': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'YituTech/conv-bert-base': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+}
+
+Model_settings_dict.update(model_settings_dict)
+
+
+def check_keys_matching(*sets, model_settings_dict):
+    # Combine all input sets using union
+    all_pretrain = set().union(*sets)
+    
+    # Get the keys from Model_settings_dict
+    model_keys = set(model_settings_dict.keys())
+    
+    # Check if all keys in Model_settings_dict match the combined pretrain set
+    return model_keys == all_pretrain
+
+# Example usage
+assert check_keys_matching(Audio_pretrain, Text_pretrain, Text_Summary, model_settings_dict=Model_settings_dict)
+
 
 
 class ModelArg:
@@ -151,15 +226,7 @@ class SingleForwardModel(LightningModule):
         # self.clf2 = nn.Linear(int(self.hidden/2), self.num_labels)
 
     def _setup_embedding(self,inp_embed_type, inp_hidden_size):
-        if "mbert" in inp_embed_type:
-            inp_pretrained = 'bert-base-multilingual-uncased'
-            inp_tokenizer = BertTokenizer.from_pretrained(inp_pretrained)
-            inp_model = BertModel.from_pretrained(inp_pretrained)
-        elif "xlm" in inp_embed_type:
-            inp_pretrained = 'xlm-mlm-100-1280'
-            inp_tokenizer = XLMTokenizer.from_pretrained(inp_pretrained)
-            inp_model = XLMModel.from_pretrained(inp_pretrained)
-        elif inp_embed_type == "en":
+        if inp_embed_type == "en":
             inp_pretrained = "jonatasgrosman/wav2vec2-large-xlsr-53-english"
             inp_tokenizer = Wav2Vec2FeatureExtractor.from_pretrained(inp_pretrained)
             inp_model = Wav2Vec2Model.from_pretrained(inp_pretrained)
@@ -175,19 +242,43 @@ class SingleForwardModel(LightningModule):
             inp_pretrained = 'facebook/wav2vec2-base'
             inp_tokenizer = Wav2Vec2FeatureExtractor.from_pretrained(inp_pretrained)
             inp_model = Wav2Vec2Model.from_pretrained(inp_pretrained)
+        elif inp_embed_type in mbert_series:
+            inp_pretrained = 'bert-base-multilingual-uncased'
+            inp_tokenizer = BertTokenizer.from_pretrained(inp_pretrained)
+            inp_model = BertModel.from_pretrained(inp_pretrained)
+        elif inp_embed_type in xlm_mlm_100_1280:
+            inp_pretrained = 'xlm-mlm-100-1280'
+            inp_tokenizer = XLMTokenizer.from_pretrained(inp_pretrained)
+            inp_model = XLMModel.from_pretrained(inp_pretrained)
+        elif inp_embed_type in Text_Summary:
+            inp_pretrained = 'bert-base-multilingual-uncased'
+            inp_tokenizer = BertTokenizer.from_pretrained(inp_pretrained)
+            inp_model = BertModel.from_pretrained(inp_pretrained)
+        elif inp_embed_type in bert_library:
+            inp_pretrained = inp_embed_type
+            inp_tokenizer = AutoTokenizer.from_pretrained(inp_pretrained)
+            inp_model = AutoModel.from_pretrained(inp_pretrained)
         else:
             raise ValueError(f"{inp_embed_type} seems not in Model_settings_dict")
         pooler = BertPooler(inp_hidden_size)
         return inp_tokenizer, inp_model, pooler
     def _get_embedding(self,inp,inp_embed_type, inp_model, pooler):
-        if "mbert" in inp_embed_type:
+        if inp_embed_type in mbert_series:
             out = inp_model(inp)[1]
-        elif "xlm" in inp_embed_type:
+        elif inp_embed_type in xlm_mlm_100_1280:
             out = inp_model(inp)[0]
             out = pooler(out)
+        elif inp_embed_type in bert_library:
+            if inp_embed_type=='xlnet-base-cased':
+                out = inp_model(inp)[0]
+                out = pooler(out)
+            else:
+                out = inp_model(inp)[1]
         elif inp_embed_type in Audio_pretrain:
             out = inp_model(inp)['extract_features']  # [2] # last_hidden_state, feature extraction
             out = out[:, 0, :]
+        elif inp_embed_type in Text_Summary:
+            out = inp_model(inp)[1]
         else:
             raise ValueError("Invalid inp_embed_type specified.")
         
@@ -209,9 +300,16 @@ class SingleForwardModel(LightningModule):
             'scheduler': scheduler,
         }
 
-    def _Tokenize(self, df, inp_embed_type, inp_col_name, tg_sr=16000):
+    def _Tokenize(self, df, inp_embed_type, inp_col_name, inp_tokenizer,tg_sr=16000):
         if inp_embed_type in Text_pretrain:
-            df[inp_col_name] = df[inp_col_name].map(lambda x: self.inp_tokenizer.encode(
+            df[inp_col_name] = df[inp_col_name].map(lambda x: inp_tokenizer.encode(
+                str(x),
+                padding='max_length',
+                max_length=self.mdlArg.max_length,
+                truncation=True,
+            ))
+        elif inp_embed_type in Text_Summary:
+            df[inp_col_name] = df[inp_col_name].map(lambda x: inp_tokenizer.encode(
                 str(x),
                 padding='max_length',
                 max_length=self.mdlArg.max_length,
@@ -219,7 +317,7 @@ class SingleForwardModel(LightningModule):
             ))
         elif inp_embed_type in Audio_pretrain:
             audio_root = "/mnt/Internal/FedASR/Data/ADReSS-IS2020-data/clips"
-            df[inp_col_name] = df[inp_col_name].map(lambda x: self.inp_tokenizer(
+            df[inp_col_name] = df[inp_col_name].map(lambda x: inp_tokenizer(
                 librosa.load(f"{audio_root}/{x}")[0],
                 padding='max_length',
                 sampling_rate=tg_sr,
@@ -234,9 +332,9 @@ class SingleForwardModel(LightningModule):
         df_train = pd.read_csv(f"{self.inpArg.file_in}/train.csv")
         df_dev = pd.read_csv(f"{self.inpArg.file_in}/dev.csv")
         df_test = pd.read_csv(f"{self.inpArg.file_in}/test.csv")
-        self.df_train=self._Tokenize(df_train, self.inp_embed_type, self.inpArg.inp_col_name)
-        self.df_dev=self._Tokenize(df_dev, self.inp_embed_type,self.inpArg.inp_col_name)
-        self.df_test=self._Tokenize(df_test, self.inp_embed_type,self.inpArg.inp_col_name)
+        self.df_train=self._Tokenize(df_train, self.inp_embed_type, self.inpArg.inp_col_name,self.inp_tokenizer)
+        self.df_dev=self._Tokenize(df_dev, self.inp_embed_type,self.inpArg.inp_col_name,self.inp_tokenizer)
+        self.df_test=self._Tokenize(df_test, self.inp_embed_type,self.inpArg.inp_col_name,self.inp_tokenizer)
 
         print(f'# of train:{len(df_train)}, val:{len(df_dev)}, test:{len(df_test)}')
         self._df2Dataset()
@@ -394,7 +492,7 @@ class SingleForwardModel(LightningModule):
         # pred_df = pd.DataFrame(pred_dict)
         # pred_df.to_csv(
         #     f'{self.args.Output_dir}/{self.inp_embed_type}_val_pred.csv')
-        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='val')
+        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='_val')
         self.val_step_outputs.clear()
         # self.val_step_targets.clear()
         return {'loss': _loss}
@@ -432,15 +530,25 @@ class SingleForwardModel(LightningModule):
         # pred_df = pd.DataFrame(pred_dict)
         # pred_df.to_csv(
         #     f'{self.args.Output_dir}/{self.inp_embed_type}_test_pred.csv')
-        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='test')
-
+        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='_test')
+    def _DecideDtype(self,inp_embed_type):
+        if inp_embed_type in Text_pretrain:
+            dtype=torch.long
+        elif inp_embed_type in Audio_pretrain:
+            dtype=torch.float
+        elif inp_embed_type in Text_Summary:
+            dtype=torch.long
+        return dtype
+    def _safe_output(self):
+        self.outStr=self.inp_embed_type.replace("/","__")
     def _save_results_to_csv(self, df_result, pred_dict, args, suffix):
         # Save df_result to CSV
-        df_result.to_csv(f'{args.Output_dir}/{self.inp_embed_type}{suffix}.csv')
+        self._safe_output()
+        df_result.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}.csv')
 
         # Save pred_df to CSV
         pred_df = pd.DataFrame(pred_dict)
-        pred_df.to_csv(f'{args.Output_dir}/{self.inp_embed_type}{suffix}_pred.csv')
+        pred_df.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}_pred.csv')
 
 
     

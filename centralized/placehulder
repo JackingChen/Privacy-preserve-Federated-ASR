@@ -1,0 +1,60 @@
+bert-base-uncased
+xlm-roberta-base
+albert-base-v1
+xlnet-base-cased
+emilyalsentzer/Bio_ClinicalBERT
+dmis-lab/biobert-base-cased-v1.2
+YituTech/conv-bert-base
+
+models_list = [
+    "bert-base-uncased",
+    "xlm-roberta-base",
+    "albert-base-v1",
+    "xlnet-base-cased",
+    "emilyalsentzer/Bio_ClinicalBERT",
+    "dmis-lab/biobert-base-cased-v1.2",
+    "YituTech/conv-bert-base"
+]
+
+model_settings_dict = {
+    'bert-base-uncased': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'xlm-roberta-base': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'albert-base-v1': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'xlnet-base-cased': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'emilyalsentzer/Bio_ClinicalBERT': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'dmis-lab/biobert-base-cased-v1.2': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+    'YituTech/conv-bert-base': {
+        'inp_col_name': 'text',
+        'inp_hidden_size': 768,
+        'file_in': '/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h',
+    },
+}
+
+Model_settings_dict.update(model_settings_dict)
+
+
+print(model_settings_dict)

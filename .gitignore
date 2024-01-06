@@ -23,3 +23,5 @@ federated/src/*.json
 federated/src/*.md
 federated/src/[DEBUG]testWhisper.py
 federated/src/options_debug.py
+env.sh
+centralized/lightning_logs/**/*
