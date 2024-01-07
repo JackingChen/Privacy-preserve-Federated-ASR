@@ -25,3 +25,9 @@ federated/src/[DEBUG]testWhisper.py
 federated/src/options_debug.py
 env.sh
 centralized/lightning_logs/**/*
+EmbFeats/**/*
+Model/**/*
+result/**/*
+result_classification/**/*
+result_regression/**/*
+Analysis/**/*

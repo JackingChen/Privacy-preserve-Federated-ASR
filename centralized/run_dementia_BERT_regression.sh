@@ -24,7 +24,7 @@ parse_args "$@"
 
 # `:-`：是默认值设置的运算符。
 stage="${stage:-0}"
-device=3
+device=0
 audioInfile_root=./saves/results
 # infile=(data2vec-audio-large-960h_test.csv data2vec-audio-large-960h_train.csv)
 infile=(data2vec-audio-large-960h_train.csv data2vec-audio-large-960h_dev.csv data2vec-audio-large-960h_test.csv)
@@ -37,50 +37,59 @@ if [ "$stage" -le 0 ]; then
 fi
 
 
-a_mdl=(en gr)
-t_mdl=(mbert_sentence xlm_sentence)
-# t_mdl=(xlm)
-
 
 # wv 跟 gr都會壞掉，不要跑
 if [ "$stage" -le 1 ]; then
-    test_mdls=(en multi mbert_sentence xlm_sentence)
-    # test_mdls=(gr)
-    # test_mdls=(wv)
+    # test_mdls=(en multi mbert_sentence xlm_sentence)
+    test_mdls=(en multi mbert_sentence xlm_sentence mbert_session xlm_session
+        xlm-roberta-base
+        albert-base-v1
+        xlnet-base-cased
+        emilyalsentzer/Bio_ClinicalBERT
+        dmis-lab/biobert-base-cased-v1.2
+        YituTech/conv-bert-bases
+        )
+
     for inpm in "${test_mdls[@]}"; do
-        CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl1input.py --inp_embed "$inpm" --epochs 5 
+        CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl1input.py --inp_embed "$inpm" --epochs 5 --task regression
     done
 fi
 
+# if [ "$stage" -le 2 ]; then
+#     # test_mdls=(mbert_session xlm_session)
+#     test_mdls=(xlm_session)
+#     for inpm in "${test_mdls[@]}"; do
+#         CUDA_VISIBLE_DEVICES=$device python 0207_DM_SessionLvl1input.py --inp_embed "$inpm" --epochs 5 
+#     done
+# fi
+
+# if [ "$stage" -le 3 ]; then
+#     test_mdls1=(en multi mbert_sentence xlm_sentence)
+#     # test_mdls2=(anomia)
+#     # test_mdls1=(en)
+#     test_mdls2=(anomia)
+#     for inpm1 in "${test_mdls1[@]}"; do
+#         for inpm2 in "${test_mdls2[@]}"; do
+#             CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl2inputHeterogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 5
+#         done
+#     done
+# fi
 
 if [ "$stage" -le 2 ]; then
-    # test_mdls=(mbert_session xlm_session)
-    test_mdls=(xlm_session)
-    for inpm in "${test_mdls[@]}"; do
-        CUDA_VISIBLE_DEVICES=$device python 0207_DM_SessionLvl1input.py --inp_embed "$inpm" --epochs 5 
-    done
-fi
-
-if [ "$stage" -le 3 ]; then
-    test_mdls1=(en multi mbert_sentence xlm_sentence)
-    # test_mdls2=(anomia)
-    # test_mdls1=(en)
-    test_mdls2=(anomia)
-    for inpm1 in "${test_mdls1[@]}"; do
-        for inpm2 in "${test_mdls2[@]}"; do
-            CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl2inputHeterogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 5
-        done
-    done
-fi
-
-if [ "$stage" -le 4 ]; then
     test_mdls1=(en multi)
-    test_mdls2=(mbert_sentence xlm_sentence)
+    test_mdls2=(mbert_sentence xlm_sentence xlm-roberta-base
+        albert-base-v1
+        xlnet-base-cased
+        emilyalsentzer/Bio_ClinicalBERT
+        dmis-lab/biobert-base-cased-v1.2
+        YituTech/conv-bert-bases
+        )
     # test_mdls1=(en)
     # test_mdls2=(mbert_sentence)
     for inpm1 in "${test_mdls1[@]}"; do
         for inpm2 in "${test_mdls2[@]}"; do
-            CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl2inputHomogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 5 
+            CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl2inputHomogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 5 --task regression
+            # CUDA_VISIBLE_DEVICES=$device python 0207_DM_SentenceLvl2inputHomogeneous.py --inp1_embed "$inpm1" --inp2_embed "$inpm2" --epochs 1 --task regression
         done
     done
 fi
@@ -129,3 +138,26 @@ fi
 #     done
 # fi
 
+
+
+# Wait for all background processes to finish
+for pid in "${pids[@]}"; do
+    wait "$pid"
+    exit_code=$?
+    
+    if [ $exit_code -ne 0 ]; then
+        command=$(ps -o cmd= -p "$pid")
+        errors+=("Error: $command")
+    fi
+done
+
+# Print any errors
+if [ ${#errors[@]} -gt 0 ]; then
+    echo "Errors occurred. Details written to $errors_file:"
+    for error in "${errors[@]}"; do
+        echo "$error"
+    done
+else
+    echo "All processes completed successfully."
+    rm -f "$errors_file"
+fi
