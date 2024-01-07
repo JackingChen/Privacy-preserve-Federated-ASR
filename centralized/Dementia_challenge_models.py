@@ -15,7 +15,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, TensorDataset
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, LinearLR ,CosineAnnealingLR
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
 
@@ -25,6 +25,7 @@ from pytorch_lightning.callbacks import Callback, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score,classification_report
+from sklearn.metrics import mean_absolute_error,r2_score,median_absolute_error,mean_squared_error,max_error,explained_variance_score
 from sklearn.model_selection import train_test_split
 
 from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
@@ -39,6 +40,23 @@ from langchain.schema.output_parser import StrOutputParser
 from langchain.schema.runnable import RunnableLambda
 from addict import Dict
 import librosa
+
+def regression_report(y_true, y_pred):
+    
+    # error = y_true - y_pred
+    # percentil = [5,25,50,75,95]
+    # percentil_value = np.percentile(error, percentil)
+    
+    metrics_dict = {
+        'mean absolute error': mean_absolute_error(y_true, y_pred),
+        'median absolute error': median_absolute_error(y_true, y_pred),
+        'mean squared error': mean_squared_error(y_true, y_pred),
+        'max error': max_error(y_true, y_pred),
+        'r2 score': r2_score(y_true, y_pred),
+        'explained variance score': explained_variance_score(y_true, y_pred)
+    }
+
+    return metrics_dict
 
 class BertPooler(nn.Module):
     def __init__(self,hidden_size):
@@ -293,7 +311,12 @@ class SingleForwardModel(LightningModule):
 
     def configure_optimizers(self):
         optimizer = AdamW(self.parameters(), lr=self.config['lr'])
-        scheduler = ExponentialLR(optimizer, gamma=0.5)
+        scheduler_dict={
+            'exp':ExponentialLR(optimizer, gamma=0.5),
+            'lin':LinearLR(optimizer),
+            'cos':CosineAnnealingLR(optimizer,T_max=5)
+        }
+        scheduler = scheduler_dict[self.config['lr_scheduler']]
         
         return {
             'optimizer': optimizer,
@@ -551,4 +574,175 @@ class SingleForwardModel(LightningModule):
         pred_df.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}_pred.csv')
 
 
+class SingleForwardModelRegression(SingleForwardModel):
+    # """
+    # Is the model of 0207_DM_SentenceLvl1input.py
+    # """
+    def __init__(self, args,config):
+        super().__init__(args, config)
+        # config:
+        
+
+        self.label_names = ['mmse']
+        self.num_labels = 1
+    def _df2Dataset(self):
+        def DecideDtype(inp_embed_type):
+            if inp_embed_type in Text_pretrain:
+                dtype=torch.long
+            elif inp_embed_type in Audio_pretrain:
+                dtype=torch.float
+            return dtype
+        dtype=DecideDtype(self.inp_embed_type)
+        self.train_data = TensorDataset(
+            torch.tensor(self.df_train[self.inpArg.inp_col_name].tolist(), dtype=dtype),
+            torch.tensor(self.df_train[self.label_cols].tolist(), dtype=torch.float),
+        )
+        
+        self.val_data = TensorDataset(
+             torch.tensor(self.df_dev[self.inpArg.inp_col_name].tolist(), dtype=dtype),
+            torch.tensor(self.df_dev[self.label_cols].tolist(), dtype=torch.float),
+        )
+
+        self.test_data = TensorDataset(
+             torch.tensor(self.df_test[self.inpArg.inp_col_name].tolist(), dtype=dtype),
+            torch.tensor(self.df_test[self.label_cols].tolist(), dtype=torch.float),
+             torch.tensor(self.df_test.index.tolist(), dtype=torch.long),
+        )
+    def training_step(self, batch, batch_idx):
+        # token, audio, labels = batch  
+        token,  labels = batch  
+        # logits = self(token, audio) 
+        logits = self(token) 
+        loss = nn.MSELoss()(logits, labels)   
+        
+        return {'loss': loss}
+    def validation_step(self, batch, batch_idx):
+        # token, audio, labels = batch  
+        token, labels = batch  
+        # logits = self(token, audio) 
+        logits = self(token) 
+        loss = nn.MSELoss()(logits, labels)     
+        
+        preds = logits.argmax(dim=-1)
+
+        y_true = list(labels.cpu().numpy())
+        y_pred = list(preds.cpu().numpy())
+
+        # --> HERE STEP 2 <--
+        self.val_step_outputs.append({
+            'loss': loss,
+            'y_true': y_true,
+            'y_pred': y_pred,
+        })
+        # self.val_step_targets.append(y_true)
+        return {
+            'loss': loss,
+            'y_true': y_true,
+            'y_pred': y_pred,
+        }
+    def test_step(self, batch, batch_idx):
+        # token, audio, labels,id_ = batch 
+        token, labels,id_ = batch 
+        print('id', id_)
+        # logits = self(token, audio) 
+        logits = self(token) 
+        
+        preds = logits.argmax(dim=-1)
+
+        y_true = list(labels.cpu().numpy())
+        y_pred = list(preds.cpu().numpy())
+
+        # --> HERE STEP 2 <--
+        self.test_step_outputs.append({
+            'y_true': y_true,
+            'y_pred': y_pred,
+        })
+        # self.test_step_targets.append(y_true)
+        return {
+            'y_true': y_true,
+            'y_pred': y_pred,
+        }
+    def on_validation_epoch_end(self):
+        loss = torch.tensor(0, dtype=torch.float)
+        for i in self.val_step_outputs:
+            loss += i['loss'].cpu().detach()
+        _loss = loss / len(self.val_step_outputs)
+        loss = float(_loss)
+        y_true = []
+        y_pred = []
+
+        for i in self.val_step_outputs:
+            y_true += i['y_true']
+            y_pred += i['y_pred']
+            
+        y_pred = np.asanyarray(y_pred)#y_temp_pred y_pred
+        y_true = np.asanyarray(y_true)
+        
+        pred_dict = {}
+        pred_dict['y_pred']= y_pred
+        pred_dict['y_true']= y_true
+        
+        val_acc = r2_score(y_true=y_true, y_pred=y_pred)
+        
+        self.log("val_acc", val_acc)
+        # print("y_pred= ", y_pred)
+        # print('\n\n\n')
+        # print("y_true= ", y_true)
+        # print('\n\n\n')
+        print("-------val_report-------")
+        metrics_dict = regression_report(y_true, y_pred)
+        df_result = pd.DataFrame(list(metrics_dict.values()), index=metrics_dict.keys(), columns=['corrs']).transpose()
+        pprint(df_result)
+        
+
+        # df_result.to_csv(
+        #     f'{self.args.Output_dir}/{self.inp_embed_type}_val.csv')
+
+        # pred_df = pd.DataFrame(pred_dict)
+        # pred_df.to_csv(
+        #     f'{self.args.Output_dir}/{self.inp_embed_type}_val_pred.csv')
+        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='_val')
+        self.val_step_outputs.clear()
+        # self.val_step_targets.clear()
+        return {'loss': _loss}
+    def on_test_epoch_end(self):
+
+        y_true = []
+        y_pred = []
+
+        for i in self.test_step_outputs:
+            y_true += i['y_true']
+            y_pred += i['y_pred']
+            
+        y_pred = np.asanyarray(y_pred)#y_temp_pred y_pred
+        y_true = np.asanyarray(y_true)
+        
+        pred_dict = {}
+        pred_dict['y_pred']= y_pred
+        pred_dict['y_true']= y_true
+        
+        
+        print("-------test_report-------")
+        metrics_dict = regression_report(y_true, y_pred)
+        df_result = pd.DataFrame(list(metrics_dict.values()), index=metrics_dict.keys(), columns=['corrs']).transpose()
+        self.test_step_outputs.clear()
+        # self.test_step_targets.clear()
+        pprint(df_result)
+        
+
+        # df_result.to_csv(
+        #     f'{self.args.Output_dir}/{self.inp_embed_type}_test.csv')
+
+        # pred_df = pd.DataFrame(pred_dict)
+        # pred_df.to_csv(
+        #     f'{self.args.Output_dir}/{self.inp_embed_type}_test_pred.csv')
+        self._save_results_to_csv(df_result, pred_dict, self.args, suffix='_test')
+    def _save_results_to_csv(self, df_result, pred_dict, args, suffix):
+        # Save df_result to CSV
+        self._safe_output()
+        df_result.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}.csv')
+
+        # Save pred_df to CSV
+        pred_df = pd.DataFrame(pred_dict)
+        pred_df.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}_pred.csv')
     

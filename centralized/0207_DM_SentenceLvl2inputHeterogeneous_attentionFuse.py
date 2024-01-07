@@ -33,6 +33,7 @@ from transformers import BertTokenizer, BertConfig, BertModel,XLMTokenizer, XLMM
 from Dementia_challenge_models import SingleForwardModel, BertPooler, Audio_pretrain, ModelArg, Model_settings_dict, Text_pretrain, Text_Summary
 import librosa
 
+
 class Model(SingleForwardModel):
     def __init__(self, args, config):
         super().__init__(args, config)
@@ -47,19 +48,46 @@ class Model(SingleForwardModel):
         self.inp1_hidden_size = self.inp1Arg.inp_hidden_size
         self.inp2_hidden_size = self.inp2Arg.inp_hidden_size
         self.hidden = int(self.inp1_hidden_size + self.inp2_hidden_size)
-        self.clf1 = nn.Linear(self.hidden, int(self.hidden/2))
-        self.clf2 = nn.Linear(int(self.hidden/2), self.num_labels)
+        self.alignhiddensize=128
+
+        self.clf1 = nn.Linear(self.inp1_hidden_size, self.alignhiddensize)
+        self.clf2 = nn.Linear(self.inp1_hidden_size, self.alignhiddensize)
         self.inp1_tokenizer, self.inp1_model, self.pooler1=self._setup_embedding(self.inp1_embed_type, self.inp1_hidden_size)
         self.inp2_tokenizer, self.inp2_model, self.pooler2=self._setup_embedding(self.inp2_embed_type, self.inp2_hidden_size)
 
+        self.ta_nh = self.config['ta_nh']
+        self.at_nh = self.config['at_nh']
+        
+        self.ta_dp = self.config['ta_dp']
+        self.at_dp = self.config['at_dp']
+
+        self.mha_a_t = nn.MultiheadAttention(embed_dim=self.alignhiddensize, num_heads= self.ta_nh,dropout=self.at_dp)
+        self.mha_t_a = nn.MultiheadAttention(embed_dim=self.alignhiddensize, num_heads= self.ta_nh ,dropout= self.ta_dp)
+        self.dense1 = nn.Linear(self.alignhiddensize*2, self.alignhiddensize)
+        self.dense2 = nn.Linear(self.alignhiddensize, self.alignhiddensize)
+        self.dense3 = nn.Linear(self.alignhiddensize, self.num_labels)
     def forward(self, inp1, inp2):
-        # Add or modify the forward method for NewModel2
-        # You can still use the functionality from the parent class by calling super().forward(inp)
-        # ...
         out1 = self._get_embedding(inp1,self.inp1_embed_type, self.inp1_model, self.pooler1)
         out2 = self._get_embedding(inp2,self.inp2_embed_type, self.inp2_model, self.pooler2)
-        output = torch.cat((out1,out2),axis=1)  
-        logits = self.clf2(self.clf1(output))
+        out1_expanded = self.clf1(out1.unsqueeze(1))
+        out2_expanded = self.clf1(out2.unsqueeze(1))
+
+
+
+        # audio to text 
+        x_a2t, _ = self.mha_a_t(out1_expanded, out2_expanded, out2_expanded) 
+        x_a2t = torch.mean(x_a2t, dim=1)
+
+        # text to audio  
+        x_t2a, _ = self.mha_t_a(out2_expanded, out1_expanded, out1_expanded) 
+        x_t2a = torch.mean(x_t2a, dim=1)
+
+        x_ta2 = torch.stack((x_a2t, x_t2a), dim=1) 
+        x_ta2_mean, x_ta2_std = torch.std_mean(x_ta2, dim=1)
+        x_ta2 = torch.cat((x_ta2_mean, x_ta2_std), dim=1) 
+        fuse = x_ta2
+
+        logits=self.dense3(self.dense2(self.dense1(fuse)))  
     
         return logits
     def preprocess_dataframe(self):
@@ -212,7 +240,6 @@ def main(args,config):
     else:
         raise ValueError()
     model.preprocess_dataframe()
-
     early_stop_callback = EarlyStopping(
         monitor='val_acc',
         patience=10,
@@ -259,6 +286,11 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=2e-5, help="learning rate")
     parser.add_argument("--lr_scheduler", type=str, default='exp', help="learning rate")
 
+    parser.add_argument("--ta_nh", type=int, default=2)
+    parser.add_argument("--at_nh", type=int, default=2)
+    parser.add_argument("--ta_dp", type=float, default=0.1)
+    parser.add_argument("--at_dp", type=float, default=0.1)
+
     parser.add_argument("--random_seed", type=int, default=2023) 
     parser.add_argument("--inp1_embed", type=str, default="mbert_sentence", help="should only be raw text or raw audio. It has to be sentence level stuff") 
     parser.add_argument("--inp2_embed", type=str, default="en", help="") 
@@ -270,7 +302,7 @@ if __name__ == '__main__':
     SaveRoot=config.SaveRoot
     script_path, file_extension = os.path.splitext(__file__)
 
-    config.params_tuning_str='__'.join([config.inp1_embed,config.inp1_embed])
+    config.params_tuning_str='__'.join([config.inp1_embed,config.inp2_embed])
     # 使用os.path模組取得檔案名稱
     script_name = os.path.basename(script_path)
     task_str='result_regression' if config.task=='regression' else 'result_classification'

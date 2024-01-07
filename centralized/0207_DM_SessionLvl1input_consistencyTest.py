@@ -30,7 +30,7 @@ from sklearn.model_selection import train_test_split
 from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 from transformers import BertTokenizer, BertConfig, BertModel,XLMTokenizer, XLMModel
 
-from Dementia_challenge_models import SingleForwardModel, BertPooler, Audio_pretrain, ModelArg, Model_settings_dict, Text_pretrain, SingleForwardModelRegression
+from Dementia_challenge_models import SingleForwardModel, BertPooler, Audio_pretrain, ModelArg, Model_settings_dict, Text_pretrain
 import librosa
 
 class Model(SingleForwardModel):
@@ -45,29 +45,15 @@ class Model(SingleForwardModel):
         self.clf1 = nn.Linear(self.hidden, int(self.hidden/2))
         self.clf2 = nn.Linear(int(self.hidden/2), self.num_labels)
 
-class ModelRegression(SingleForwardModelRegression):
-    def __init__(self, args, config):
-        super().__init__(args, config)
-        self.inpArg = args.inpArg
-        self.inp_embed_type = self.config['inp_embed']
-        self.inp_col_name = self.inpArg.inp_col_name
-        self.inp_hidden_size = self.inpArg.inp_hidden_size
-        self.hidden = int(self.inpArg.linear_hidden_size)
-        self.inp_tokenizer, self.inp_model, self.pooler=self._setup_embedding(self.inp_embed_type, self.inp_hidden_size)
-        self.clf1 = nn.Linear(self.hidden, int(self.hidden/2))
-        self.clf2 = nn.Linear(int(self.hidden/2), self.num_labels)
+
+
 
 def main(args,config):
     print("Using PyTorch Ver", torch.__version__)
     print("Fix Seed:", config['random_seed'])
     seed_everything( config['random_seed'])
-    
-    if config['task']=='regression':
-        model=ModelRegression(args,config)
-    elif config['task']=='classification':
-        model = Model(args,config) 
-    else:
-        raise ValueError()
+        
+    model = Model(args,config) 
     model.preprocess_dataframe()
 
     early_stop_callback = EarlyStopping(
@@ -78,7 +64,7 @@ def main(args,config):
     )
     
     checkpoint_callback = ModelCheckpoint(
-        dirpath=f"{SaveRoot}/Model/{config['inp_embed']}/checkpoints",
+        dirpath=f"{SaveRoot}/Model/checkpoints",
         monitor='val_acc',
         auto_insert_metric_name=True,
         verbose=True,
@@ -109,16 +95,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser("main.py", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--gpu", type=int, default=1)
-
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=2e-5, help="learning rate")
-    parser.add_argument("--lr_scheduler", type=str, default='exp', help="learning rate")
+    parser.add_argument("--trial", type=int, default=0, help="")
     parser.add_argument("--random_seed", type=int, default=2023) 
-
     parser.add_argument("--inp_embed", type=str, default="mbert") 
     parser.add_argument("--SaveRoot", type=str, default='/mnt/External/Seagate/FedASR/LLaMa2/dacs') 
     parser.add_argument("--file_in", type=str, default='/home/FedASR/dacs/centralized/saves/results/data2vec-audio-large-960h') 
-    parser.add_argument("--task", type=str, default="classification") 
+
+    
     
     config = parser.parse_args()
     SaveRoot=config.SaveRoot
@@ -127,7 +112,7 @@ if __name__ == '__main__':
     # 使用os.path模組取得檔案名稱
     script_name = os.path.basename(script_path)
 
-    Output_dir=f"{SaveRoot}/result_regression/{script_name}/" if config.task=='regression' else f"{SaveRoot}/result_classification/{script_name}/"
+    Output_dir=f"{SaveRoot}/result/{script_name}_{config.trial}/"
     os.makedirs(Output_dir, exist_ok=True)
     print(config)
 

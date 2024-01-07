@@ -44,6 +44,18 @@ class Model(SingleForwardModel):
         self.inp_tokenizer, self.inp_model, self.pooler=self._setup_embedding(self.inp_embed_type, self.inp_hidden_size)
         self.clf1 = nn.Linear(self.hidden, int(self.hidden/2))
         self.clf2 = nn.Linear(int(self.hidden/2), self.num_labels)
+    def _safe_outputStr_gen(self):
+        self.outStr=self.config['params_tuning_str'].replace("/","_")
+    def _save_results_to_csv(self, df_result, pred_dict, args, suffix):
+        # Save df_result to CSV
+        self._safe_outputStr_gen()
+        df_result.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}.csv')
+
+        # Save pred_df to CSV
+        pred_df = pd.DataFrame(pred_dict)
+        pred_df.to_csv(f'{args.Output_dir}/{self.outStr}{suffix}_pred.csv')
+
+
 
 class ModelRegression(SingleForwardModelRegression):
     def __init__(self, args, config):
@@ -72,13 +84,13 @@ def main(args,config):
 
     early_stop_callback = EarlyStopping(
         monitor='val_acc',
-        patience=10,
+        patience=config['patience'],
         verbose=True,
         mode='max'
     )
     
     checkpoint_callback = ModelCheckpoint(
-        dirpath=f"{SaveRoot}/Model/{config['inp_embed']}/checkpoints",
+        dirpath=f"{SaveRoot}/Model/{config['params_tuning_str']}/checkpoints",
         monitor='val_acc',
         auto_insert_metric_name=True,
         verbose=True,
@@ -109,10 +121,11 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser("main.py", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--gpu", type=int, default=1)
-
-    parser.add_argument("--epochs", type=int, default=5)
+    
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--lr", type=float, default=2e-5, help="learning rate")
     parser.add_argument("--lr_scheduler", type=str, default='exp', help="learning rate")
+    parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--random_seed", type=int, default=2023) 
 
     parser.add_argument("--inp_embed", type=str, default="mbert") 
@@ -124,10 +137,13 @@ if __name__ == '__main__':
     SaveRoot=config.SaveRoot
     script_path, file_extension = os.path.splitext(__file__)
 
+
+    config.params_tuning_str='__'.join([config.inp_embed,str(config.epochs),str(config.lr),config.lr_scheduler,str(config.patience)])
     # 使用os.path模組取得檔案名稱
     script_name = os.path.basename(script_path)
-
-    Output_dir=f"{SaveRoot}/result_regression/{script_name}/" if config.task=='regression' else f"{SaveRoot}/result_classification/{script_name}/"
+    task_str='result_regression' if config.task=='regression' else 'result_classification'
+    Output_dir=f"{SaveRoot}/{task_str}/{script_name}/" 
+    
     os.makedirs(Output_dir, exist_ok=True)
     print(config)
 
@@ -138,13 +154,29 @@ if __name__ == '__main__':
         linear_hidden_size = inp_hidden_size
         inp_col_name = Model_settings_dict[config.inp_embed]['inp_col_name']
         file_in = Model_settings_dict[config.inp_embed]['file_in']
+    
+    
+    
+    class ModelArgTuning:
+        version = 1
+        # data
+        epochs: int = config.epochs  # Max Epochs, BERT paper setting [3,4,5]
+        max_length: int = 350  # Max Length input size
+        report_cycle: int = 30  # Report (Train Metrics) Cycle
+        cpu_workers: int = os.cpu_count()  # Multi cpu workers
+        test_mode: bool = False  # Test Mode enables `fast_dev_run`
+        lr_scheduler: str = config.lr_scheduler  # ExponentialLR vs CosineAnnealingWarmRestarts
+        fp16: bool = False  # Enable train on FP16
+        batch_size: int = 8
+
+    
     class Arg:
-        mdlArg=ModelArg()
+        mdlArg=ModelArgTuning()
         inpArg=InpArg()
         Output_dir=Output_dir
 
     args = Arg()
-    args.mdlArg.epochs=config.epochs
+    # args.mdlArg.epochs=config.epochs
     main(args,config.__dict__)       
 
 
